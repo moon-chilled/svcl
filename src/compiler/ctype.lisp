@@ -242,7 +242,7 @@ and no value was provided for it." name))))))))))
      (let* ((ctype (lvar-type lvar))
             (int (funcall *ctype-test-fun* ctype type)))
        (cond ((not int)
-              (unless (type= ctype (specifier-type '(member dummy)))
+              (unless (type= ctype (specifier-type '(eql dummy)))
                 (note-lossage "The ~:R argument is a ~S, not a ~S."
                               n (type-specifier ctype) (type-specifier type)))
               nil)
@@ -290,7 +290,7 @@ and no value was provided for it." name))))))))))
 ;;; type. If the key isn't a constant, then we can't tell, so we can
 ;;; complain about absence of manifest winnage.
 (defun check-key-args (name args pre-key type)
-  (declare (list args) (fixnum pre-key) (fun-type type))
+  (declare (list args) (fixnum pre-key) (type fun-type type))
   (declare (ignorable name))
   (let (lossages allow-other-keys
         unknown-keys)
@@ -368,8 +368,7 @@ and no value was provided for it." name))))))))))
                     (:required (req type))
                     (:optional (opt type))
                     (:keyword
-                     (keys (make-key-info :name (arg-info-key info)
-                                          :type type)))
+                     (keys (make-key-info (arg-info-key info) type)))
                     ((:rest :more-context)
                      (setq rest *universal-type*))
                     (:more-count))
@@ -379,7 +378,7 @@ and no value was provided for it." name))))))))))
            :required (req)
            :optional (opt)
            :rest rest
-           :keywords (keys)
+           :keywords (sb-kernel::intern-key-infos (keys))
            :keyp (optional-dispatch-keyp functional)
            :allowp (optional-dispatch-allowp functional)
            :returns (let ((tail-set (lambda-tail-set
@@ -837,7 +836,7 @@ and no value was provided for it." name))))))))))
                             (not (member :result (cdr really-assert)))))
                (assert-lvar-type (return-result return) type-returns
                                  policy
-                                 :ftype)))
+                                 'ftype-context)))
            (loop for var in vars
                  for type in types do
                  (cond ((basic-var-sets var)
@@ -1082,7 +1081,7 @@ and no value was provided for it." name))))))))))
 
 (defun %compile-time-type-error (values atype dtype detail code-context cast-context)
   (declare (ignore dtype))
-  (cond ((eq cast-context :ftype)
+  (cond ((eq cast-context 'ftype-context)
          (error 'simple-type-error
                 :datum (car values)
                 :expected-type atype
@@ -1144,7 +1143,7 @@ and no value was provided for it." name))))))))))
                                            (condition 'type-warning))
   (let ((*compiler-error-context* node))
     (cond ((eq atype nil))
-          ((eq cast-context :ftype)
+          ((eq cast-context 'ftype-context)
            (warn condition
                  :format-control
                  "~@<Derived type of ~/sb-impl:print-type-specifier/ is ~

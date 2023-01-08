@@ -34,8 +34,8 @@
   (:import-from "SB-X86-64-ASM" #:near-jump-displacement
                 #:near-cond-jump-displacement #:mov #:call #:jmp
                 #:get-gpr #:reg-name)
-  (:import-from "SB-IMPL" #:package-hashtable #:package-%name
-                #:package-hashtable-cells
+  (:import-from "SB-IMPL" #:symbol-hashset #:package-%name
+                #:symtbl-%cells
                 #:hash-table-pairs #:hash-table-%count))
 
 (in-package "SB-EDITCORE")
@@ -200,25 +200,18 @@
 (defun in-bounds-p (addr bounds)
   (and (>= addr (bounds-low bounds)) (< addr (bounds-high bounds))))
 
-(defun make-hashset (contents count)
-  (if (<= count 20)
-      (coerce contents 'vector)
-      (let ((ht (make-hash-table :test 'equal)))
-        (dolist (x contents ht)
-          (setf (gethash x ht) t)))))
+(defun make-string-hashset (contents count)
+  (let ((hs (sb-int:make-hashset count #'string= #'sxhash)))
+    (dolist (string contents hs)
+      (sb-int:hashset-insert hs string))))
 
-(defun hashset-find (item hashset)
-  (if (vectorp hashset)
-      (find item hashset :test 'string=)
-      (gethash item hashset)))
-
-(defun scan-package-hashtable (function table core)
-  (let ((spaces (core-spaces core))
-        (nil-object (core-nil-object core)))
-    (dovector (x (translate
-                  (package-hashtable-cells
-                   (truly-the package-hashtable (translate table spaces)))
-                  spaces))
+(defun scan-symbol-hashset (function table core)
+  (let* ((spaces (core-spaces core))
+         (nil-object (core-nil-object core))
+         (cells (translate (symtbl-%cells (truly-the symbol-hashset
+                                                     (translate table spaces)))
+                           spaces)))
+    (dovector (x (translate (cdr cells) spaces))
       (unless (fixnump x)
         (funcall function
                  (if (eq x nil-object) ; any random package can export NIL. wow.
@@ -271,18 +264,18 @@
              (let ((externals (gethash package-name packages))
                    (n 0))
                (unless externals
-                 (scan-package-hashtable
+                 (scan-symbol-hashset
                   (lambda (string symbol)
                     (declare (ignore symbol))
                     (incf n)
                     (push string externals))
                   (package-external-symbols package)
                   core)
-                 (setf externals (make-hashset externals n)
+                 (setf externals (make-string-hashset externals n)
                        (gethash package-name packages) externals))
                (make-core-sym package-name
                               name
-                              (hashset-find name externals))))))
+                              (sb-int:hashset-find externals name))))))
         (t "?"))))))
 
 (defun remove-name-junk (name)
@@ -484,7 +477,7 @@
       (dovector (x (translate (%instance-ref (translate package-table spaces) 0) spaces))
         (when (%instancep x) ; package
           (flet ((scan (table)
-                   (scan-package-hashtable
+                   (scan-symbol-hashset
                     (lambda (str sym)
                       (pushnew (get-lisp-obj-address sym) (gethash str symbols)))
                     table core)))

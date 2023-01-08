@@ -285,8 +285,8 @@
 
 (defun prepare-alu-operands (x y vop const-tn-xform commutative)
   (let ((arg (vop-args vop)))
-    (when (tn-ref-load-tn arg)
-      (bug "Shouldn't have a load TN for arg0"))
+    ;; (when (tn-ref-load-tn arg)
+    ;;   (bug "Shouldn't have a load TN for arg0"))
     (let ((arg (tn-ref-across arg)))
       (when (and arg (tn-ref-load-tn arg))
         (bug "Shouldn't have a load TN for arg1"))))
@@ -514,7 +514,7 @@
   (:save-p :compute-only)
   (:generator 6
     (move eax x)
-    (inst mul eax y)
+    (inst mul y)
     (move r eax)))
 
 (define-vop (fast-*-c/unsigned=>unsigned fast-safe-arith-op)
@@ -534,7 +534,7 @@
   (:save-p :compute-only)
   (:generator 6
     (move eax x)
-    (inst mul eax (register-inline-constant :qword y))
+    (inst mul :qword (register-inline-constant :qword y))
     (move r eax)))
 
 (define-vop ()
@@ -826,7 +826,7 @@
   (:translate truncate)
   (:args (x :scs (any-reg) :target eax)
          (y :scs (any-reg control-stack)))
-  (:args-var args)
+  (:arg-refs nil y-ref)
   (:arg-types tagged-num tagged-num)
   (:temporary (:sc signed-reg :offset rax-offset :target quo
                :from (:argument 0) :to (:result 0)) eax)
@@ -839,7 +839,7 @@
   (:vop-var vop)
   (:save-p :compute-only)
   (:generator 31
-    (when (types-equal-or-intersect (tn-ref-type (tn-ref-across args))
+    (when (types-equal-or-intersect (tn-ref-type y-ref)
                                     (specifier-type '(eql 0)))
       (if (sc-is y signed-reg)
           (inst test y y)               ; smaller instruction
@@ -847,7 +847,7 @@
       (inst jmp :eq (generate-error-code vop 'division-by-zero-error x y)))
     (move eax x)
     (inst cqo)
-    (inst idiv eax y)
+    (inst idiv y)
     (if (location= quo eax)
         (inst shl eax n-fixnum-tag-bits)
         (if (= n-fixnum-tag-bits 1)
@@ -875,7 +875,7 @@
     (move eax x)
     (inst cqo)
     (inst mov y-arg (fixnumize y))
-    (inst idiv eax y-arg)
+    (inst idiv y-arg)
     (if (location= quo eax)
         (inst shl eax n-fixnum-tag-bits)
         (if (= n-fixnum-tag-bits 1)
@@ -888,7 +888,7 @@
   (:args (x :scs (unsigned-reg) :target eax)
          (y :scs (unsigned-reg signed-stack)))
   (:arg-types unsigned-num unsigned-num)
-  (:args-var args)
+  (:arg-refs nil y-ref)
   (:temporary (:sc unsigned-reg :offset rax-offset :target quo
                :from (:argument 0) :to (:result 0)) eax)
   (:temporary (:sc unsigned-reg :offset rdx-offset :target rem
@@ -900,7 +900,7 @@
   (:vop-var vop)
   (:save-p :compute-only)
   (:generator 33
-    (when (types-equal-or-intersect (tn-ref-type (tn-ref-across args))
+    (when (types-equal-or-intersect (tn-ref-type y-ref)
                                     (specifier-type '(eql 0)))
       (if (sc-is y signed-reg)
           (inst test y y)               ; smaller instruction
@@ -908,7 +908,7 @@
       (inst jmp :eq (generate-error-code vop 'division-by-zero-error x y)))
     (move eax x)
     (zeroize edx)
-    (inst div eax y)
+    (inst div y)
     (move quo eax)
     (move rem edx)))
 
@@ -932,7 +932,7 @@
     (move eax x)
     (zeroize edx)
     (inst mov y-arg y)
-    (inst div eax y-arg)
+    (inst div y-arg)
     (move quo eax)
     (move rem edx)))
 
@@ -940,7 +940,7 @@
   (:translate truncate)
   (:args (x :scs (signed-reg) :target eax)
          (y :scs (signed-reg signed-stack)))
-  (:args-var args)
+  (:arg-refs nil y-ref)
   (:arg-types signed-num signed-num)
   (:temporary (:sc signed-reg :offset rax-offset :target quo
                    :from (:argument 0) :to (:result 0)) eax)
@@ -953,7 +953,7 @@
   (:vop-var vop)
   (:save-p :compute-only)
   (:generator 33
-    (when (types-equal-or-intersect (tn-ref-type (tn-ref-across args))
+    (when (types-equal-or-intersect (tn-ref-type y-ref)
                                     (specifier-type '(eql 0)))
       (if (sc-is y signed-reg)
           (inst test y y)               ; smaller instruction
@@ -961,7 +961,7 @@
       (inst jmp :eq (generate-error-code vop 'division-by-zero-error x y)))
     (move eax x)
     (inst cqo)
-    (inst idiv eax y)
+    (inst idiv y)
     (move quo eax)
     (move rem edx)))
 
@@ -985,7 +985,7 @@
     (move eax x)
     (inst cqo)
     (inst mov y-arg y)
-    (inst idiv eax y-arg)
+    (inst idiv y-arg)
     (move quo eax)
     (move rem edx)))
 
@@ -1136,11 +1136,11 @@
 (define-vop (fast-ash-left/fixnum-modfx=>fixnum
              fast-ash-left/fixnum=>fixnum)
   (:translate ash-left-modfx)
-  (:args-var args)
+  (:arg-refs nil amount-ref)
   (:generator 3
     (with-shift-operands
       (move ecx amount)
-      (unless (csubtypep (tn-ref-type (tn-ref-across args)) ;; amount
+      (unless (csubtypep (tn-ref-type amount-ref)
                          (specifier-type '(mod 63)))
         (inst cmp amount 63)
         (inst jmp :be OKAY)
@@ -1160,11 +1160,11 @@
 (define-vop (fast-ash-left/unsigned-mod64=>unsigned
              fast-ash-left/unsigned=>unsigned)
   (:translate ash-left-mod64)
-  (:args-var args)
+  (:arg-refs nil amount-ref)
   (:generator 3
     (with-shift-operands
       (move ecx amount)
-      (unless (csubtypep (tn-ref-type (tn-ref-across args)) ;; amount
+      (unless (csubtypep (tn-ref-type amount-ref)
                          (specifier-type '(mod 63)))
         (inst cmp amount 63)
         (inst jmp :be OKAY)
@@ -1228,7 +1228,7 @@
   (:results (result :scs (unsigned-reg) :from (:argument 0)))
   (:result-types unsigned-num)
   (:temporary (:sc signed-reg :offset rcx-offset :from (:argument 1)) ecx)
-  (:args-var args)
+  (:arg-refs nil amount-ref)
   (:variant-vars check-amount signed)
   (:note "inline ASH")
   (:generator 5
@@ -1237,7 +1237,7 @@
     (inst test ecx ecx)
     (inst jmp :ns POSITIVE)
     (inst neg ecx)
-    (unless (csubtypep (tn-ref-type (tn-ref-across args))
+    (unless (csubtypep (tn-ref-type amount-ref)
                        (specifier-type `(integer -63 *)))
       (inst cmp ecx 63)
       (inst jmp :be OKAY)
@@ -1253,7 +1253,7 @@
 
     POSITIVE
     (unless (or (not check-amount) ;; The result-type ensures us that this shift will not overflow.
-                (csubtypep (tn-ref-type (tn-ref-across args))
+                (csubtypep (tn-ref-type amount-ref)
                            (specifier-type `(integer * 63))))
       (inst cmp ecx 63)
       (inst jmp :be STILL-OKAY)
@@ -1279,7 +1279,7 @@
          (amount :scs (signed-reg) :target ecx))
   (:arg-types (:or signed-num unsigned-num) signed-num)
   (:results (result :scs (any-reg) :from (:argument 0)))
-  (:args-var args)
+  (:arg-refs nil amount-ref)
   (:result-types tagged-num)
   (:temporary (:sc signed-reg :offset rcx-offset :from (:argument 1)) ecx)
   (:note "inline ASH")
@@ -1289,7 +1289,7 @@
     (inst test ecx ecx)
     (inst jmp :ns POSITIVE)
     (inst neg ecx)
-    (unless (csubtypep (tn-ref-type (tn-ref-across args))
+    (unless (csubtypep (tn-ref-type amount-ref)
                        (specifier-type `(integer -63 *)))
       (inst cmp ecx 63)
       (inst jmp :be OKAY)
@@ -1307,7 +1307,7 @@
     (inst jmp DONE)
 
     POSITIVE
-    (unless (csubtypep (tn-ref-type (tn-ref-across args))
+    (unless (csubtypep (tn-ref-type amount-ref)
                        (specifier-type `(integer * 63)))
       (inst cmp ecx 63)
       (inst jmp :be STILL-OKAY)
@@ -1333,6 +1333,119 @@
   (:result-types unsigned-num)
   (:variant t t)
   (:translate ash-mod64))
+
+;;; Given an unsigned 32-bit dividend and magic numbers, compute the truncated quotient.
+;;; The 2nd through 4th args are 'magic', 'add', 'shift'.
+(defknown udiv32-via-multiply ((unsigned-byte 32)
+                               (unsigned-byte 32) bit (integer 0 31))
+  (unsigned-byte 32)
+  (flushable))
+(define-vop ()
+  (:translate udiv32-via-multiply)
+  (:policy :fast-safe)
+  (:args (dividend :scs (unsigned-reg))
+         (magic :scs (unsigned-reg))
+         (add :scs (unsigned-reg))
+         (shift :scs (unsigned-reg)))
+  (:arg-types unsigned-num unsigned-num unsigned-num unsigned-num)
+  (:results (quotient :scs (unsigned-reg)))
+  (:result-types unsigned-num)
+  (:temporary (:sc unsigned-reg :offset rcx-offset) rcx)
+  (:temporary (:sc unsigned-reg) temp)
+  (:generator 6
+    (inst mov :dword temp dividend)
+    (inst imul temp magic)
+    (inst test :byte add add)
+    (inst jmp :z no-add)
+    (inst shr temp 32) ; temp is now the quotient 'q'
+    (inst mov :dword rcx dividend)
+    (inst sub :dword rcx temp) ; compute (n - quotient)
+    (inst shr :dword rcx 1)
+    (inst lea :dword temp (ea rcx temp)) ; add 'q'
+    (inst lea :dword rcx (ea -1 shift))
+    (inst shr :dword temp :cl) ; shift by s-1
+    (inst jmp OUT)
+    NO-ADD
+    (inst lea :dword rcx (ea 32 shift))
+    (inst shr temp :cl)
+    OUT
+    (inst mov :dword quotient temp)))
+
+;;; Given an unsigned 32-bit dividend and divisor, compute the remainder
+;;; using the Granlund & Montgomery approach.
+;;; The inputs to this vop are the dividend, the divisor, and the <m,a,s>
+;;; components of the magic.
+(defknown urem32-via-multiply ((unsigned-byte 32) (unsigned-byte 32)
+                               (unsigned-byte 32) bit (integer 0 31))
+  (unsigned-byte 32)
+  (flushable))
+(define-vop ()
+  (:translate urem32-via-multiply)
+  (:policy :fast-safe)
+  (:args (dividend :scs (unsigned-reg))
+         (divisor :scs (unsigned-reg))
+         (magic :scs (unsigned-reg))
+         (add :scs (unsigned-reg immediate))
+         (shift :scs (unsigned-reg)))
+  (:arg-types unsigned-num unsigned-num unsigned-num unsigned-num unsigned-num)
+  (:results (remainder :scs (unsigned-reg)))
+  (:result-types unsigned-num)
+  (:temporary (:sc unsigned-reg :offset rcx-offset) rcx)
+  (:temporary (:sc unsigned-reg :offset rax-offset) rax)
+  (:temporary (:sc unsigned-reg :offset rdx-offset) rdx)
+  (:ignore rdx)
+  (:generator 10
+    (inst mov :dword rax dividend)
+    (inst imul rax magic)
+    (cond ((sc-is add immediate)
+           (aver (= (tn-value add) 0))) ; for now I only need add=0
+          (t
+           (inst test :byte add add)
+           (inst jmp :z no-add)
+           (inst shr rax 32) ; rax is now the quotient 'q'
+           (inst mov :dword rcx dividend)
+           (inst sub :dword rcx rax) ; compute (n - quotient)
+           (inst shr :dword rcx 1)
+           (inst lea :dword rax (ea rcx rax)) ; add 'q'
+           (inst lea :dword rcx (ea -1 shift))
+           (inst shr :dword rax :cl) ; shift by s-1
+           (inst jmp CALC-REMAINDER)))
+    NO-ADD
+    (inst lea :dword rcx (ea 32 shift))
+    (inst shr rax :cl)
+    CALC-REMAINDER
+    ;; EAX is the quotient. Multiply it by the divisor, and then take
+    ;; the difference of that and the divisor.
+    (inst mul :dword divisor) ; clobbers EDX too
+    (inst neg rax)
+    (inst lea remainder (ea dividend rax))))
+
+;;; Given a dividend, scaled reciprocal-of-divisor, and divisor (in that order)
+;;; compute a remainder using the approach of Lemire, Kaser, Kurz.
+;;;
+(macrolet
+    ((define-fastrem (bits opsize
+                           &aux (name (symbolicate "FASTREM-" (write-to-string bits))))
+       `(define-vop (,name)
+          (:translate ,name)
+          (:policy :fast-safe)
+          (:args (dividend :scs (unsigned-reg) :target rax)
+                 (c :scs (unsigned-reg))
+                 (divisor :scs (unsigned-reg)))
+          (:arg-types unsigned-num unsigned-num unsigned-num)
+          (:results (remainder :scs (unsigned-reg)))
+          (:result-types unsigned-num)
+          (:temporary (:sc unsigned-reg :offset rax-offset
+                       :from (:argument 0) :to (:result 0)) rax)
+          (:temporary (:sc unsigned-reg :offset rdx-offset
+                       :from (:argument 0) :to (:result 0)) rdx)
+          (:generator 10
+            (move rax dividend ,opsize)
+            (inst mul ,opsize c) ; result to rDX:rAX (but we expressly drop all bits from rDX)
+            (inst mul ,opsize divisor) ; new we want _only_ bits from rDX
+            (move remainder rdx ,opsize)))))
+  (define-fastrem 32 :dword)
+  (define-fastrem 64 :qword))
 
 (in-package "SB-C")
 
@@ -1665,7 +1778,7 @@
   (:args (x :scs (descriptor-reg)))
   (:arg-types * (:constant integer))
   (:info y)
-  (:args-var arg-ref)
+  (:arg-refs arg-ref)
   (:conditional :ne)
   (:generator 1
    (let ((disp (cdr (tn-ref-memory-access arg-ref))))
@@ -1839,7 +1952,7 @@
   (:args (x :scs (descriptor-reg)))
   (:arg-types (:constant (mod 64)) *)
   (:info bit)
-  (:args-var arg-ref)
+  (:arg-refs arg-ref)
   (:vop-var vop)
   (:conditional :ne)
   (:ignore temp)
@@ -1952,7 +2065,7 @@
                                    ,(symbolicate "FAST-CONDITIONAL"  suffix))
                         (:translate ,tran)
                         (:conditional ,(if signed cond unsigned))
-                        (:args-var x-tn-ref)
+                        (:arg-refs x-tn-ref)
                         (:generator ,cost
                           (emit-optimized-cmp
                            x ,(if (eq suffix '-c/fixnum) `(fixnumize y) 'y)
@@ -2078,7 +2191,7 @@
   (:conditional :e)
   (:policy :fast-safe)
   (:translate eql %eql/integer)
-  (:args-var x-tn-ref)
+  (:arg-refs x-tn-ref)
   (:generator 2 (emit-optimized-cmp x (fixnumize y) temp (tn-ref-type x-tn-ref))))
 
 ;;; FIXME: this seems never to be invoked any more. What did we either break or improve?
@@ -2337,7 +2450,7 @@
   (:policy :fast-safe)
   (:args (a :scs (unsigned-reg) :target result)
          (b :scs (unsigned-reg unsigned-stack) :to :eval)
-         (c :scs (any-reg unsigned-reg control-stack) :target temp))
+         (c :scs (any-reg unsigned-reg control-stack immediate) :target temp))
   (:arg-types unsigned-num unsigned-num positive-fixnum)
   (:temporary (:sc any-reg :from (:argument 2) :to :eval) temp)
   (:results (result :scs (unsigned-reg) :from (:argument 0))
@@ -2346,9 +2459,14 @@
   (:result-types unsigned-num positive-fixnum)
   (:generator 4
     (move result a)
-    (move temp c)
-    (inst neg temp) ; Set the carry flag to 0 if c=0 else to 1
-    (inst adc result b)
+    (cond ((and (sc-is c immediate)
+                (zerop (tn-value c)))
+           (inst add result b))
+          (t
+           (move temp c)
+           (inst neg temp)  ; Set the carry flag to 0 if c=0 else to 1
+           (inst adc result b)))
+
     (unless (eq (tn-kind carry) :unused)
      (inst set :c carry)
      (inst and :dword carry 1))))
@@ -2360,16 +2478,21 @@
   (:policy :fast-safe)
   (:args (a :scs (unsigned-reg) :to :eval :target result)
          (b :scs (unsigned-reg unsigned-stack) :to :result)
-         (c :scs (any-reg unsigned-reg control-stack)))
+         (c :scs (any-reg unsigned-reg control-stack immediate)))
   (:arg-types unsigned-num unsigned-num positive-fixnum)
   (:results (result :scs (unsigned-reg) :from :eval)
             (borrow :scs (unsigned-reg)))
   (:optional-results borrow)
   (:result-types unsigned-num positive-fixnum)
   (:generator 5
-    (inst cmp c 1) ; Set the carry flag to 1 if c=0 else to 0
-    (move result a)
-    (inst sbb result b)
+    (cond ((and (sc-is c immediate)
+                (eql (tn-value c) 1))
+           (move result a)
+           (inst sub result b))
+          (t
+           (inst cmp c 1)   ; Set the carry flag to 1 if c=0 else to 0
+           (move result a)
+           (inst sbb result b)))
     (unless (eq (tn-kind borrow) :unused)
      (inst mov borrow 1)
      (inst sbb :dword borrow 0))))
@@ -2390,7 +2513,7 @@
   (:result-types unsigned-num unsigned-num)
   (:generator 20
     (move eax x)
-    (inst mul eax y)
+    (inst mul y)
     (inst add eax carry-in)
     (inst adc edx 0)
     (move hi edx)
@@ -2413,7 +2536,7 @@
   (:result-types unsigned-num unsigned-num)
   (:generator 20
     (move eax x)
-    (inst mul eax y)
+    (inst mul y)
     (inst add eax prev)
     (inst adc edx 0)
     (inst add eax carry-in)
@@ -2437,7 +2560,7 @@
   (:result-types unsigned-num unsigned-num)
   (:generator 20
     (move eax x)
-    (inst mul eax y)
+    (inst mul y)
     (move hi edx)
     (move lo eax)))
 
@@ -2455,7 +2578,7 @@
   (:result-types unsigned-num)
   (:generator 20
     (move eax x)
-    (inst mul eax y)
+    (inst mul y)
     (move hi edx)))
 
 (define-vop (mulhi/fx)
@@ -2471,7 +2594,7 @@
   (:result-types positive-fixnum)
   (:generator 15
     (move eax x)
-    (inst mul eax y)
+    (inst mul y)
     (move hi edx)
     (inst and hi (lognot fixnum-tag-mask))))
 
@@ -2526,7 +2649,7 @@
   (:generator 300
     (move edx div-high)
     (move eax div-low)
-    (inst div eax divisor)
+    (inst div divisor)
     (move quo eax)
     (move rem edx)))
 

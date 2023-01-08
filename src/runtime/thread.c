@@ -342,7 +342,7 @@ void create_main_lisp_thread(lispobj function) {
 #if defined THREADS_USING_GCSIGNAL && \
     (defined LISP_FEATURE_PPC || defined LISP_FEATURE_PPC64 || defined LISP_FEATURE_ARM64 || defined LISP_FEATURE_RISCV)
     /* SIG_STOP_FOR_GC defaults to blocked on PPC? */
-    unblock_gc_signals();
+    unblock_gc_stop_signal();
 #endif
     link_thread(th);
     th->os_kernel_tid = get_nonzero_tid();
@@ -388,6 +388,8 @@ void create_main_lisp_thread(lispobj function) {
 
 void free_thread_struct(struct thread *th)
 {
+    struct extra_thread_data *extra_data = thread_extra_data(th);
+    if (extra_data->arena_savearea) free(extra_data->arena_savearea);
     os_deallocate((os_vm_address_t) th->os_address, THREAD_STRUCT_SIZE);
 }
 
@@ -670,7 +672,7 @@ static void attach_os_thread(init_thread_data *scribble)
     /* new-lisp-thread-trampoline doesn't like when the GC signal is blocked */
     /* FIXME: could be done using a single call to pthread_sigmask
        together with blocking the deferrable signals above. */
-    unblock_gc_signals();
+    unblock_gc_stop_signal();
 #endif
 
     th->os_kernel_tid = get_nonzero_tid();
@@ -969,10 +971,6 @@ alloc_thread_struct(void* spaces) {
     // Once allocated, the allocation profiling buffer sticks around.
     // If present and enabled, assign into the new thread.
     th->profile_data = (uword_t*)(alloc_profiling ? alloc_profile_buffer : 0);
-
-# ifdef LISP_FEATURE_WIN32
-    thread_extra_data(th)->carried_base_pointer = 0;
-# endif
 
     struct extra_thread_data *extra_data = thread_extra_data(th);
     memset(extra_data, 0, sizeof *extra_data);

@@ -3154,6 +3154,43 @@
                                      (reg-offset rd)))))))
   (def movi 0))
 
+(def-emitter fp-cond-select
+  (0 1 31)
+  (0 1 30)
+  (0 1 29)
+  (#b11110 5 24)
+  (ptype 2 22)
+  (#b1 1 21)
+  (rm 5 16)
+  (cond 4 12)
+  (#b11 2 10)
+  (rn 5 5)
+  (rd 5 0))
+
+(define-instruction-format (fp-cond-select 32
+                            :default-printer '(:name :tab rd  ", " rn ", " rm ", " cond))
+  (m :field (byte 1 31) :value #b0)
+  (op1 :field (byte 1 30) :value #b0)
+  (s :field (byte 1 29) :value #b0)
+  (op2 :field (byte 5 24) :value #b11110)
+  (ptype :field (byte 2 22))
+  (rm :fields (list (byte 2 22) (byte 5 16)) :type 'float-reg)
+  (cond :field (byte 4 12) :type 'cond)
+  (op3 :field (byte 2 10) :value #b11)
+  (rn :fields (list (byte 2 22) (byte 5 5)) :type 'float-reg)
+  (rd :fields (list (byte 2 22) (byte 5 0)) :type 'float-reg))
+
+(define-instruction fcsel (segment rd rn rm cond)
+  (:printer fp-cond-select ())
+  (:emitter
+   (emit-fp-cond-select
+    segment
+    (fp-reg-type rd)
+    (reg-offset rm)
+    (conditional-opcode cond)
+    (reg-offset rn)
+    (reg-offset rd))))
+
 ;;; Inline constants
 (defun canonicalize-inline-constant (constant)
   (let ((first (car constant))
@@ -3385,13 +3422,14 @@
        (not (tn-ref-next (sb-c::tn-reads dst1)))
        (let ((vop (tn-ref-vop (sb-c::tn-reads dst1))))
          (and vop
-              (or (not safe-vops)
-                  (memq (vop-name vop) safe-vops))
-              (or (not safe-translates)
-                  (and vop
-                       (memq (car (sb-c::vop-parse-translate
-                                   (sb-c::vop-parse-or-lose (vop-name vop))))
-                             safe-translates))))))))
+              (or
+               (memq (vop-name vop) safe-vops)
+               (and vop
+                    (memq (car (sb-c::vop-parse-translate
+                                (sb-c::vop-parse-or-lose (vop-name vop))))
+                          safe-translates))
+               (and (not safe-vops)
+                    (not safe-translates))))))))
 
 (defun tagged-mask-p (x)
   (and (integerp x)
@@ -3521,8 +3559,24 @@
                  (location= dst1 srcm)
                  (not (location= srcn srcm))
                  (stmt-delete-safe-p dst1 dst2
-                                     '(- sb-vm::--mod64 sb-vm::--modfx)))
+                                     '(- sb-vm::--mod64 sb-vm::--modfx
+                                       %negate)))
         (setf (stmt-operands next) (list dst2 srcn (lsl src1 (- 63 imms))))
+        (add-stmt-labels next (stmt-labels stmt))
+        (delete-stmt stmt)
+        next))))
+
+(defpattern "asr + sub -> sub" ((sbfm) (sub)) (stmt next)
+  (destructuring-bind (dst1 src1 immr imms) (stmt-operands stmt)
+    (destructuring-bind (dst2 srcn srcm) (stmt-operands next)
+      (when (and (= imms 63)
+                 (tn-p srcm)
+                 (location= dst1 srcm)
+                 (not (location= srcn srcm))
+                 (stmt-delete-safe-p dst1 dst2
+                                     '(- sb-vm::--mod64 sb-vm::--modfx
+                                       %negate)))
+        (setf (stmt-operands next) (list dst2 srcn (asr src1 immr)))
         (add-stmt-labels next (stmt-labels stmt))
         (delete-stmt stmt)
         next))))
@@ -3538,7 +3592,8 @@
                  (stmt-delete-safe-p dst1 dst2
                                      '(ash
                                        sb-vm::ash-left-mod64
-                                       sb-vm::ash-left-modfx)))
+                                       sb-vm::ash-left-modfx)
+                                     '(sb-vm::move-from-word/fixnum)))
         (let ((shift (+ (- 63 imms1)
                         (- 63 imms2))))
           (when (<= shift 63)
@@ -3559,6 +3614,37 @@
         (add-stmt-labels next (stmt-labels stmt))
         (delete-stmt stmt)
         next))))
+
+(defpattern "sbfm + ubfm -> sbfm" ((sbfm) (ubfm)) (stmt next)
+  (destructuring-bind (dst1 src1 immr1 imms1) (stmt-operands stmt)
+    (destructuring-bind (dst2 src2 immr2 imms2) (stmt-operands next)
+      (cond ((and (= immr1 0)
+                  (= (1+ imms2) immr2)
+                  (location= dst1 src2)
+                  (stmt-delete-safe-p dst1 dst2
+                                      '(ash
+                                        sb-vm::ash-left-mod64
+                                        sb-vm::ash-left-modfx)
+                                      '(sb-vm::move-from-word/fixnum)))
+             (setf (stmt-mnemonic next) 'sbfm
+                   (stmt-operands next)
+                   (list dst2 src1 immr2 imms1))
+             (add-stmt-labels next (stmt-labels stmt))
+             (delete-stmt stmt)
+             next)
+            ((and (> immr1 imms1)
+                  (= (1+ imms2) immr2)
+                  (location= dst1 src2)
+                  (stmt-delete-safe-p dst1 dst2
+                                      '(ash
+                                        sb-vm::ash-left-mod64
+                                        sb-vm::ash-left-modfx)))
+             (setf (stmt-mnemonic next) 'sbfm
+                   (stmt-operands next)
+                   (list dst2 src1 (mod (+ immr1 immr2) 64) imms1))
+             (add-stmt-labels next (stmt-labels stmt))
+             (delete-stmt stmt)
+             next)))))
 
 ;;; An even number can be shifted right and then negated,
 ;;; and fixnums are even.

@@ -463,7 +463,7 @@
 ;;; of the slot in the SB-DI:: version of the structure.
 (defun make-compiled-debug-fun (compiler-debug-fun component)
   (declare (code-component component))
-  #+gencgc
+  #+gencgc ; TODO: can we make this hang off the code via a weak-pointer?
   (let ((memo-cell
          (let* ((info (sb-vm::%%code-debug-info component))
                 (val (sb-c::compiled-debug-info-memo-cell info)))
@@ -635,12 +635,16 @@
 (defun code-header-from-pc (pc)
   (with-code-pages-pinned (:dynamic)
     (let ((base-ptr
-           (sb-alien:alien-funcall
-            (sb-alien:extern-alien "component_ptr_from_pc"
-                                   (function sb-alien:unsigned system-area-pointer))
-            (etypecase pc
-              (system-area-pointer pc)
-              (word (int-sap pc))))))
+            ;; FIXME: It's accessing *dynspace-codeblob-tree*, which
+            ;; isn't gc-safe when done from C (especially on the
+            ;; precise gc backends).
+            (without-gcing
+              (sb-alien:alien-funcall
+               (sb-alien:extern-alien "component_ptr_from_pc"
+                                      (function sb-alien:unsigned system-area-pointer))
+               (etypecase pc
+                 (system-area-pointer pc)
+                 (word (int-sap pc)))))))
       (unless (= base-ptr 0) (%make-lisp-obj (logior base-ptr other-pointer-lowtag))))))
 
 ;;;; (OR X86 X86-64) support

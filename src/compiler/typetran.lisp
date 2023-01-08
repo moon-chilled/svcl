@@ -636,45 +636,33 @@
 
 #+sb-simd-pack
 (defun source-transform-simd-pack-typep (object type)
-  (if (type= type (specifier-type 'simd-pack))
+  (let ((mask (simd-pack-type-tag-mask type)))
+    (if (= mask sb-kernel::+simd-pack-wild+)
       `(simd-pack-p ,object)
-      (let ((n-tag (gensym "TAG")))
-        `(and
-          (simd-pack-p ,object)
-          (let ((,n-tag (%simd-pack-tag ,object)))
-            (or ,@(loop
-                    for bit across (simd-pack-type-element-type type)
-                    for i from 0
-                    if (= bit 1)
-                      collect `(eql ,n-tag ,i))))))))
+      `(and (simd-pack-p ,object)
+            ,(if (= (logcount mask) 1)
+                 `(eql (%simd-pack-tag ,object) ,(sb-vm::simd-pack-mask->tag mask))
+                 `(logbitp (%simd-pack-tag ,object) ,mask))))))
 
 #+sb-simd-pack-256
 (defun source-transform-simd-pack-256-typep (object type)
-  (if (type= type (specifier-type 'simd-pack-256))
-      `(simd-pack-256-p ,object)
-      (let ((n-tag (gensym "TAG")))
-        `(and
-          (simd-pack-256-p ,object)
-          (let ((,n-tag (%simd-pack-256-tag ,object)))
-            (or ,@(loop
-                    for bit across (simd-pack-256-type-element-type type)
-                    for i from 0
-                    if (= bit 1)
-                      collect `(eql ,n-tag ,i))))))))
+  (let ((mask (simd-pack-256-type-tag-mask type)))
+    (if (= mask sb-kernel::+simd-pack-wild+)
+        `(simd-pack-256-p ,object)
+        `(and (simd-pack-256-p ,object)
+              ,(if (= (logcount mask) 1)
+                   `(eql (%simd-pack-256-tag ,object) ,(sb-vm::simd-pack-mask->tag mask))
+                   `(logbitp (%simd-pack-256-tag ,object) ,mask))))))
 
 #+sb-simd-pack-512
 (defun source-transform-simd-pack-512-typep (object type)
-  (if (type= type (specifier-type 'simd-pack-512))
-      `(simd-pack-512-p ,object)
-      (let ((n-tag (gensym "TAG")))
-        `(and
-          (simd-pack-512-p ,object)
-          (let ((,n-tag (%simd-pack-512-tag ,object)))
-            (or ,@(loop
-                    for bit across (simd-pack-512-type-element-type type)
-                    for i from 0
-                    if (= bit 1)
-                      collect `(eql ,n-tag ,i))))))))
+  (let ((mask (simd-pack-512-type-tag-mask type)))
+    (if (= mask sb-kernel::+simd-pack-wild+)
+        `(simd-pack-512-p ,object)
+        `(and (simd-pack-512-p ,object)
+              ,(if (= (logcount mask) 1)
+                   `(eql (%simd-pack-512-tag ,object) ,(sb-vm::simd-pack-mask->tag mask))
+                   `(logbitp (%simd-pack-512-tag ,object) ,mask))))))
 
 ;;; Return the predicate and type from the most specific entry in
 ;;; *TYPE-PREDICATES* that is a supertype of TYPE.
@@ -1049,8 +1037,12 @@
              (or
               (let ((pred (backend-type-predicate ctype)))
                 (when pred `(,pred ,object)))
-              (let ((pred (backend-type-predicate (type-negation ctype))))
-                (when pred `(not (,pred ,object)))))
+              (let* ((negated (type-negation ctype))
+                     (pred (backend-type-predicate negated)))
+                (cond (pred
+                       `(not (,pred ,object)))
+                      ((numeric-type-p negated)
+                       `(not ,(%source-transform-typep object (type-specifier negated)))))))
            #+sb-xc-host
            (sb-kernel::cross-type-warning
              nil))

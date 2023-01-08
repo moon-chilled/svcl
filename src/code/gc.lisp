@@ -219,8 +219,6 @@ run in any thread.")
 (defun post-gc ()
   (sb-impl::finalizer-thread-notify)
   (alien-funcall (extern-alien "empty_thread_recyclebin" (function void)))
-  ;; This is probably the same as detecting a change in *GC-EPOCH*. Maybe remove?
-  (setq sb-impl::*pn-cache-force-recount* t)
   ;; Post-GC actions are invoked synchronously by the GCing thread,
   ;; which is an arbitrary one. If those actions aquire any locks, or are sensitive
   ;; to the state of *ALLOW-WITH-INTERRUPTS*, any deadlocks of what-have-you
@@ -328,8 +326,7 @@ guaranteed to be collected."
          ;; but there is no automatic cache rehashing after GC.
          (sb-format::tokenize-control-string-cache-clear))
         ((eql 1 gen)
-         (sb-format::tokenize-control-string-cache-clear)
-         (ctype-of-cache-clear))
+         (sb-format::tokenize-control-string-cache-clear))
         (t
          (drop-all-hash-caches)))
   #-gencgc

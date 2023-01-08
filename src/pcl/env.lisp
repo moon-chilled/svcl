@@ -65,7 +65,8 @@
                 mf)
              plist ,arg-info simple-next-method-call t)
            source-loc))))))
-(!install-cross-compiled-methods 'make-load-form :except '(wrapper))
+(!install-cross-compiled-methods 'make-load-form
+                                 :except '(wrapper sb-alien-internals:alien-type))
 
 (defmethod make-load-form ((class class) &optional env)
   ;; FIXME: should we not instead pass ENV to FIND-CLASS?  Probably
@@ -85,6 +86,10 @@
              (wrapper-classoid object)))
     `(classoid-wrapper (find-classoid ',pname))))
 
+(defmethod make-load-form ((object sb-alien-internals:alien-type) &optional env)
+  (or (sb-alien::make-type-load-form object)
+      (make-load-form-saving-slots object :environment env)))
+
 ;; FIXME: this seems wrong. NO-APPLICABLE-METHOD should be signaled.
 (defun dont-know-how-to-dump (object)
   (error "~@<don't know how to dump ~S (default ~S method called).~>"
@@ -97,14 +102,3 @@
   (define-default-make-load-form-method structure-object)
   (define-default-make-load-form-method standard-object)
   (define-default-make-load-form-method condition))
-
-;;; I guess if the user defines other kinds of EQL specializers, she would
-;;; need to implement this? And how is she supposed to know that?
-(defmethod eql-specializer-to-ctype ((specializer eql-specializer))
-  (if (slot-boundp specializer 'ctype)
-      (slot-value specializer 'ctype)
-      ;; this might want to use compare-and-swap, but it doesn't
-      ;; have to be guaranteed unique.
-      ;; (This is more like a cache than an aspect of this object per se)
-      (setf (slot-value specializer 'ctype)
-            (make-eql-type (eql-specializer-object specializer)))))

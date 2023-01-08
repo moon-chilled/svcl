@@ -38,10 +38,10 @@
                   *the-class-standard-method*
                   *the-class-standard-reader-method*
                   *the-class-standard-writer-method*
-                  *the-class-standard-boundp-method*
                   *the-class-global-reader-method*
                   *the-class-global-writer-method*
                   *the-class-global-boundp-method*
+                  *the-class-global-makunbound-method*
                   *the-class-standard-generic-function*
                   *the-class-standard-direct-slot-definition*
                   *the-class-standard-effective-slot-definition*
@@ -796,6 +796,22 @@ between the ~A definition and the ~A definition"
 (define-type-class classoid :enumerable #'classoid-enumerable-p
                     :might-contain-other-types nil)
 
+(defmacro classoid-bits (x)
+  ;; CLASSOIDs have a deterministic hash based on the symbol naming the classoid,
+  ;; but HASH-LAYOUT-NAME will pick a pseudo-random hash if NAME is NIL.
+  `(logior ,(ctype-class-bits 'classoid)
+           (logand (hash-layout-name ,x) +ctype-hash-mask+)))
+;;; Now that the type-class has an ID, the various constructors can be defined.
+(macrolet ((def-make (name args &aux (allocator (symbolicate "!ALLOC-" name)))
+             `(defun ,(symbolicate "MAKE-" name) ,args
+                (declare (inline ,allocator))
+                (,allocator (classoid-bits name) ,@(remove '&key args)))))
+  (def-make undefined-classoid (name))
+  (def-make condition-classoid (&key name))
+  (def-make structure-classoid (&key name))
+  (def-make standard-classoid (&key name pcl-class))
+  (def-make static-classoid (&key name)))
+
 (defun classoid-inherits-from (sub super-or-name)
   (declare (type classoid sub)
            (type (or symbol classoid) super-or-name))
@@ -847,14 +863,8 @@ between the ~A definition and the ~A definition"
                  (%ensure-classoid-valid class2 layout2 errorp))
       (return-from %ensure-both-classoids-valid nil))))
 
-;;; Simple methods for TYPE= and SUBTYPEP should never be called when
-;;; the two classes are equal, since there are EQ checks in those
-;;; operations.
-(define-type-method (classoid :simple-=) (type1 type2)
-  (aver (not (eq type1 type2)))
-  (values nil t))
-
 (define-type-method (classoid :simple-subtypep) (class1 class2)
+  ;; Simple method should never be called on EQ args since there is an EQ check higher up
   (aver (not (eq class1 class2)))
   (with-world-lock () ; FIXME: why such coarse lock granularity here?
     (if (%ensure-both-classoids-valid class1 class2)
@@ -960,7 +970,7 @@ between the ~A definition and the ~A definition"
 
 (define-type-method (classoid :negate) (type) (make-negation-type type))
 
-(define-type-method (classoid :unparse) (type)
+(define-type-method (classoid :unparse) (flags type)
   (classoid-proper-name type))
 
 ;;;; built-in classes
@@ -1369,7 +1379,7 @@ between the ~A definition and the ~A definition"
                       (setf (classoid-cell-classoid
                              (find-classoid-cell name :create t))
                             (!make-built-in-classoid
-                             :%bits (pack-ctype-bits classoid name)
+                             :%bits (classoid-bits name)
                              :name name
                              :translation #+sb-xc-host (if trans-p :initializing nil)
                                           #-sb-xc-host translation

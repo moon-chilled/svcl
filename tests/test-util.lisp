@@ -9,10 +9,12 @@
            #:random-type
            #:type-evidently-=
            #:ctype=
+           #:type-specifiers-equal
            #:assert-tri-eq
            #:random-type
 
            ;; thread tools
+           #:*n-cpus*
            #:make-kill-thread #:make-join-thread
            #:wait-for-threads
            #:process-all-interrupts
@@ -51,6 +53,14 @@
 (defvar *threads-to-kill*)
 (defvar *threads-to-join*)
 
+(defvar *n-cpus*
+  (max 1
+       #-win32 (sb-alien:alien-funcall
+                (sb-alien:extern-alien "sysconf"
+                                       (function sb-alien:long sb-alien:int))
+                sb-unix::sc-nprocessors-onln)
+       #+win32 (sb-alien:extern-alien "os_number_of_processors" sb-alien:int)))
+
 (defun setenv (name value)
   #-win32
   (let ((r (sb-alien:alien-funcall
@@ -81,7 +91,7 @@
 (defun type-evidently-= (x y)
   (and (subtypep x y) (subtypep y x)))
 
-(defun ctype= (left right)
+(defun type-specifiers-equal (left right)
   (let ((a (sb-kernel:values-specifier-type left)))
     ;; SPECIFIER-TYPE is a memoized function, and TYPE= is a trivial
     ;; operation if A and B are EQ.
@@ -89,6 +99,8 @@
     (sb-int:drop-all-hash-caches)
     (let ((b (sb-kernel:values-specifier-type right)))
       (sb-kernel:type= a b))))
+;;; This isn't a great name. Prefer to use TYPE-SPECIFIERS-EQUAL instead
+(defun ctype= (a b) (type-specifiers-equal a b))
 
 (defmacro assert-tri-eq (expected-result expected-certainp form)
   (sb-int:with-unique-names (result certainp)
@@ -624,25 +636,36 @@
 
 (defun %checked-compile-and-assert-one-case
     (form optimize function args-thunk expected test allow-conditions)
-  (let ((args (multiple-value-list (funcall args-thunk))))
-    (flet ((failed-to-signal (expected-type)
-             (error "~@<Calling the result of compiling~
+  (if (eq args-thunk :return-type)
+      (let ((type (sb-kernel:%simple-fun-type function)))
+       (unless (or (eq type 'function)
+                   (type-specifiers-equal (caddr type) expected))
+         (error "~@<The derived type of~
+                   ~/test-util::print-form-and-optimize/ ~
+                   is ~/sb-impl:print-type-specifier/
+                   while
+                    ~/sb-impl:print-type-specifier/
+                   is expected~@:>"
+                (cons form optimize) type expected)))
+      (let ((args (multiple-value-list (funcall args-thunk))))
+        (flet ((failed-to-signal (expected-type)
+                 (error "~@<Calling the result of compiling~
                       ~/test-util::print-form-and-optimize/ ~
                       ~/test-util::print-arguments/~
                       returned normally instead of signaling a ~
                       condition of type ~
                       ~/sb-impl:print-type-specifier/.~@:>"
-                    (cons form optimize) args expected-type))
-           (signaled-unexpected (conditions)
-             (error "~@<Calling the result of compiling~
+                        (cons form optimize) args expected-type))
+               (signaled-unexpected (conditions)
+                 (error "~@<Calling the result of compiling~
                       ~/test-util::print-form-and-optimize/ ~
                       ~/test-util::print-arguments/~
                       signaled unexpected condition~P~
                       ~/test-util::print-signaled-conditions/~
                       .~@:>"
-                    (cons form optimize) args (length conditions) conditions))
-           (returned-unexpected (values expected test)
-             (error "~@<Calling the result of compiling~
+                        (cons form optimize) args (length conditions) conditions))
+               (returned-unexpected (values expected test)
+                 (error "~@<Calling the result of compiling~
                      ~/test-util::print-form-and-optimize/ ~
                      ~/test-util::print-arguments/~
                      returned values~@:_~@:_~
@@ -650,34 +673,34 @@
                      which is not ~S to~@:_~@:_~
                      ~2@T~<~{~S~^~@:_~}~:>~@:_~@:_~
                      .~@:>"
-                    (cons form optimize) args
-                    (list values) test (list expected))))
-      (multiple-value-bind (values conditions)
-          (apply #'call-capturing-values-and-conditions function args)
-        (typecase expected
-          ((cons (eql condition) (cons t null))
-           (let* ((expected-condition-type (second expected))
-                  (unexpected (remove-if (lambda (condition)
-                                           (typep condition
-                                                  expected-condition-type))
-                                         conditions))
-                  (expected (set-difference conditions unexpected)))
-             (cond
-               (unexpected
-                (signaled-unexpected unexpected))
-               ((null expected)
-                (failed-to-signal expected-condition-type)))))
-          (t
-           (let ((expected (funcall expected)))
-             (cond
-               ((and conditions
-                     (not (and allow-conditions
-                               (every (lambda (condition)
-                                        (typep condition allow-conditions))
-                                      conditions))))
-                (signaled-unexpected conditions))
-               ((not (funcall test values expected))
-                (returned-unexpected values expected test))))))))))
+                        (cons form optimize) args
+                        (list values) test (list expected))))
+          (multiple-value-bind (values conditions)
+              (apply #'call-capturing-values-and-conditions function args)
+            (typecase expected
+              ((cons (eql condition) (cons t null))
+               (let* ((expected-condition-type (second expected))
+                      (unexpected (remove-if (lambda (condition)
+                                               (typep condition
+                                                      expected-condition-type))
+                                             conditions))
+                      (expected (set-difference conditions unexpected)))
+                 (cond
+                   (unexpected
+                    (signaled-unexpected unexpected))
+                   ((null expected)
+                    (failed-to-signal expected-condition-type)))))
+              (t
+               (let ((expected (funcall expected)))
+                 (cond
+                   ((and conditions
+                         (not (and allow-conditions
+                                   (every (lambda (condition)
+                                            (typep condition allow-conditions))
+                                          conditions))))
+                    (signaled-unexpected conditions))
+                   ((not (funcall test values expected))
+                    (returned-unexpected values expected test)))))))))))
 
 (defun %checked-compile-and-assert-one-compilation
     (form optimize other-checked-compile-args cases)
@@ -742,20 +765,22 @@
                                             (optimize :quick))
                                          form &body cases)
   (flet ((make-case-form (case)
-           (destructuring-bind (args values &key (test ''equal testp)
-                                     allow-conditions)
-               case
-             (let ((conditionp (typep values '(cons (eql condition) (cons t null)))))
-               (when (and testp conditionp)
-                 (sb-ext:with-current-source-form (case)
-                   (error "~@<Cannot use ~S with ~S ~S.~@:>"
-                          values :test test)))
-               `(list (lambda () (values ,@args))
-                      ,(if conditionp
-                           `(list 'condition ,(second values))
-                           `(lambda () (multiple-value-list ,values)))
-                      ,test
-                      ,allow-conditions)))))
+           (if (typep case '(cons (member :return-type)))
+               `',case
+               (destructuring-bind (args values &key (test ''equal testp)
+                                                     allow-conditions)
+                   case
+                 (let ((conditionp (typep values '(cons (eql condition) (cons t null)))))
+                   (when (and testp conditionp)
+                     (sb-ext:with-current-source-form (case)
+                       (error "~@<Cannot use ~S with ~S ~S.~@:>"
+                              values :test test)))
+                   `(list (lambda () (values ,@args))
+                          ,(if conditionp
+                               `(list 'condition ,(second values))
+                               `(lambda () (multiple-value-list ,values)))
+                          ,test
+                          ,allow-conditions))))))
     `(%checked-compile-and-assert
       ,form (list :name ,name
                   :allow-warnings ,allow-warnings

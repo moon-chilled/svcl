@@ -946,3 +946,17 @@
 
 #+(or arm64 x86-64)
 (defknown sb-lockless::get-next (sb-lockless::list-node) (values sb-lockless::list-node t))
+
+(defknown sb-vm::fastrem-32 ((unsigned-byte 32) (unsigned-byte 32) (unsigned-byte 32))
+  (unsigned-byte 32)
+  (flushable))
+(defknown sb-vm::fastrem-64 ((unsigned-byte 64) (unsigned-byte 64) (unsigned-byte 64))
+  (unsigned-byte 64)
+  (flushable))
+
+;;; +-modfx is useful for computing a hash that is commutative in its inputs.
+;;; These architectures lack a complete set of modular operations; they have operations
+;;; which are modular in N-WORD-BITS, but not that accept fixnums.
+#+(or arm mips ppc sparc)
+(defknown sb-vm::+-modfx (integer integer) fixnum
+          (movable foldable flushable always-translatable))

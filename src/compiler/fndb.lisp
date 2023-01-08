@@ -349,8 +349,11 @@
 (defknown unary-truncate (real) (values integer real)
   (movable foldable flushable no-verify-arg-count))
 
+;;; KLUDGE: Don't fold these, the compiler may call it on floats that
+;;; do not truncate into a bignum, and the functions do not check
+;;; their input values and produce corrupted memory.
 (defknown unary-truncate-single-float-to-bignum (single-float) (values bignum (eql $0f0))
-   (foldable movable flushable fixed-args))
+    (#+(or) foldable movable flushable fixed-args))
 (defknown unary-truncate-double-float-to-bignum (double-float)
     (values #+64-bit bignum #-64-bit integer
             (and
@@ -358,12 +361,19 @@
                     (not (or riscv ppc64))) ;; they can't survive cold-init
              (eql $0d0)
              double-float))
-   (foldable movable flushable fixed-args))
+   (#+(or) foldable movable flushable fixed-args))
 
 (defknown %unary-truncate-single-float-to-bignum (single-float) bignum
-   (foldable movable flushable fixed-args))
+   (#+(or) foldable movable flushable fixed-args))
 (defknown %unary-truncate-double-float-to-bignum (double-float) bignum
-   (foldable movable flushable fixed-args))
+   (#+(or) foldable movable flushable fixed-args))
+
+(defknown (subtract-bignum add-bignums) (bignum bignum) integer
+    (movable flushable no-verify-arg-count))
+(defknown (add-bignum-fixnum subtract-bignum-fixnum) (bignum fixnum) integer
+    (movable flushable no-verify-arg-count))
+(defknown subtract-fixnum-bignum (fixnum bignum) integer
+    (movable flushable no-verify-arg-count))
 
 (defknown sxhash-bignum-double-float (double-float) hash-code
   (foldable movable flushable fixed-args))
@@ -1366,7 +1376,7 @@
   (movable foldable flushable))
 (defknown open-stream-p (stream) boolean (flushable))
 (defknown close (stream &key (:abort t)) (eql t) ())
-(defknown file-string-length (ansi-stream (or string character))
+(defknown file-string-length (stream (or string character))
   (or unsigned-byte null)
   (flushable))
 
@@ -2175,7 +2185,7 @@
   (movable foldable flushable))
 
 ;; FIXME: should T be be (OR INSTANCE FUNCALLABLE-INSTANCE) etc?
-(defknown slot-value (t symbol) t (any))
+(defknown (slot-value slot-makunbound) (t symbol) t (any))
 (defknown (slot-boundp slot-exists-p) (t symbol) boolean)
 (defknown sb-pcl::set-slot-value (t symbol t) t (any))
 

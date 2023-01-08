@@ -194,7 +194,7 @@ SBCL itself")
            "%FIXNUM-DIGIT-WITH-CORRECT-SIGN" "%FIXNUM-TO-DIGIT"
            "%BIGFLOOR" "%LOGAND" "%LOGIOR" "%LOGNOT" "%LOGXOR"
            "%MULTIPLY" "%MULTIPLY-AND-ADD"
-           "%SUBTRACT-WITH-BORROW" "ADD-BIGNUMS"
+           "%SUBTRACT-WITH-BORROW" "ADD-BIGNUMS" "ADD-BIGNUM-FIXNUM"
            "BIGNUM-ASHIFT-LEFT" "BIGNUM-ASHIFT-LEFT-FIXNUM"
            "BIGNUM-ASHIFT-RIGHT"
            "BIGNUM-COMPARE"
@@ -209,7 +209,9 @@ SBCL itself")
            "MAKE-SMALL-BIGNUM"
            "MULTIPLY-BIGNUM-AND-FIXNUM" "MULTIPLY-BIGNUMS"
            "MULTIPLY-FIXNUMS" "NEGATE-BIGNUM"
-           "%RANDOM-BIGNUM" "SUBTRACT-BIGNUM" "SXHASH-BIGNUM"
+           "%RANDOM-BIGNUM"
+           "SUBTRACT-BIGNUM" "SUBTRACT-FIXNUM-BIGNUM" "SUBTRACT-BIGNUM-FIXNUM"
+           "SXHASH-BIGNUM"
            "HALF-BIGNUM-ELEMENT-TYPE" "HALF-BIGNUM-INDEX" "HALF-BIGNUM-LENGTH"
            "%HALF-BIGNUM-REF" "%HALF-BIGFLOOR"))
 
@@ -247,7 +249,6 @@ SBCL itself")
         "SB-FASL" "SB-GRAY" "SB-INT" "SB-KERNEL" "SB-SYS"))
 
 (defpackage* "SB-SEQUENCE"
-  (:nicknames "SEQUENCE")
   (:documentation "semi-public: implements something which might eventually
 be submitted as a CDR")
   (:export "PROTOCOL-UNIMPLEMENTED"
@@ -392,6 +393,7 @@ structure representations")
            "CONTEXT-FLOATING-POINT-MODES" "CONTEXT-FLOAT-REGISTER"
            "CONTEXT-PC" "CONTEXT-REGISTER" "BOXED-CONTEXT-REGISTER"
            "CONTROL-STACK-SC-NUMBER"
+           "COPY-NUMBER-TO-HEAP"
            #+sb-safepoint "CSP-SAFEPOINT-TRAP"
            "*CURRENT-CATCH-BLOCK*"
            "CURRENT-FLOAT-TRAP"
@@ -580,6 +582,7 @@ structure representations")
            "SYMBOL-HASH-SLOT" "SYMBOL-WIDETAG" "SYMBOL-NAME-SLOT"
            "SYMBOL-PACKAGE-ID-SLOT" "SYMBOL-INFO-SLOT" "SYMBOL-FDEFN-SLOT"
            "SYMBOL-SIZE" "SYMBOL-VALUE-SLOT" "SYMBOL-TLS-INDEX-SLOT"
+           "SYMBOL-FROM-TLS-INDEX"
            "*BINDING-STACK-START*"
            "*CONTROL-STACK-START*" "*CONTROL-STACK-END*"
            "CONTROL-STACK-POINTER-VALID-P"
@@ -1326,6 +1329,8 @@ like *STACK-TOP-HINT* and unsupported stuff like *TRACED-FUN-LIST*.")
            "COMPONENT-INFO" "COMPONENT-LIVE-TN"
            "COMPONENT-N-JUMP-TABLE-ENTRIES"
            "COMPUTE-FUN" "COMPUTE-OLD-NFP" "COPY-MORE-ARG"
+           "COMPUTE-UDIV32-MAGIC"
+           "COMPUTE-FASTREM-COEFFICIENT"
            "CURRENT-BINDING-POINTER" "CURRENT-NFP-TN"
            "CURRENT-STACK-POINTER"
            "*ALIEN-STACK-POINTER*"
@@ -1379,7 +1384,7 @@ like *STACK-TOP-HINT* and unsupported stuff like *TRACED-FUN-LIST*.")
            "LVAR-VALUE"
            "MACRO-POLICY-DECLS"
            "MAKE-ALIAS-TN" "MAKE-CATCH-BLOCK"
-           "MAKE-CLOSURE" "MAKE-CONSTANT-TN"
+           "MAKE-CLOSURE" #+(or x86-64 arm64) "MAKE-CLOSURE-FROM-LABEL" "MAKE-CONSTANT-TN"
            "MAKE-FIXUP-NOTE"
            "MAKE-LOAD-TIME-CONSTANT-TN" "MAKE-N-TNS" "MAKE-NORMAL-TN"
            "MAKE-RANDOM-TN"
@@ -1735,6 +1740,7 @@ of SBCL which maintained the CMU-CL-style split into two packages.)")
            "%LOCAL-ALIEN-ADDR" "%LOCAL-ALIEN-FORCED-TO-MEMORY-P" "%SAP-ALIEN"
            "%SET-DEREF" "%SET-HEAP-ALIEN" "%SET-LOCAL-ALIEN" "%SET-SLOT"
            "%SLOT-ADDR" "*SAVED-FP*" "*VALUES-TYPE-OKAY*"
+           "*ALIEN-TYPE-HASHSETS*"
            "ALIEN-ARRAY-TYPE"
            "ALIEN-ARRAY-TYPE-DIMENSIONS" "ALIEN-ARRAY-TYPE-ELEMENT-TYPE"
            "ALIEN-ARRAY-TYPE-P" "ALIEN-BOOLEAN-TYPE" "ALIEN-BOOLEAN-TYPE-P"
@@ -2205,7 +2211,7 @@ is a good idea, but see SB-SYS re. blurring of boundaries.")
            "NON-NULL-SYMBOL-P"
            "NUMERIC-CONTAGION" "NUMERIC-TYPE"
            "NUMERIC-TYPE-CLASS" "NUMERIC-TYPE-COMPLEXP"
-           "NUMERIC-TYPE-EQUAL" "NUMERIC-TYPE-FORMAT"
+           "NUMTYPE-ASPECTS-EQ" "NUMERIC-TYPE-FORMAT"
            "NUMERIC-TYPE-HIGH" "NUMERIC-TYPE-LOW" "NUMERIC-TYPE-P"
            "OBJECT-NOT-ARRAY-ERROR" "OBJECT-NOT-CHARACTER-ERROR"
            "OBJECT-NOT-BASE-STRING-ERROR" "OBJECT-NOT-BIGNUM-ERROR"
@@ -2292,7 +2298,6 @@ is a good idea, but see SB-SYS re. blurring of boundaries.")
            "OBJECT-NOT-WEAK-POINTER-ERROR"
            "ODD-KEY-ARGS-ERROR" "OUTPUT-OBJECT" "OUTPUT-UGLY-OBJECT"
            "PACKAGE-DESIGNATOR" "PACKAGE-DOC-STRING"
-           "PACKAGE-HASHTABLE-SIZE" "PACKAGE-HASHTABLE-FREE"
            "PACKAGE-INTERNAL-SYMBOLS" "PACKAGE-EXTERNAL-SYMBOLS"
            "PARSE-UNKNOWN-TYPE"
            "PARSE-UNKNOWN-TYPE-SPECIFIER"
@@ -2521,7 +2526,7 @@ is a good idea, but see SB-SYS re. blurring of boundaries.")
            "NOTE-NAME-DEFINED"
            "%CODE-CODE-SIZE" "%CODE-TEXT-SIZE"
            "%CODE-SERIALNO"
-           "DD-SLOTS" "DD-HAS-RAW-SLOT-P" "DD-INCLUDE" "SLOT-SETTER-LAMBDA-FORM"
+           "DD-SLOTS" "DD-HAS-RAW-SLOT-P" "DD-INCLUDE"
            "SLOT-ACCESS-TRANSFORM"
            "%IMAGPART" "%CODE-DEBUG-INFO"
            "WRAPPER-CLASSOID" "WRAPPER-INVALID"
@@ -2616,6 +2621,8 @@ is a good idea, but see SB-SYS re. blurring of boundaries.")
 
            "CONDITION-SLOT-VALUE"
            "SET-CONDITION-SLOT-VALUE"
+           "CONDITION-SLOT-BOUNDP"
+           "CONDITION-SLOT-MAKUNBOUND"
 
            "CONDITION-SLOT-ALLOCATION"
            "CONDITION-SLOT-DOCUMENTATION"
@@ -2733,20 +2740,20 @@ is a good idea, but see SB-SYS re. blurring of boundaries.")
            "SIMD-PACK-DOUBLE"
            "SIMD-PACK-INT"
            "SIMD-PACK-TYPE"
-           "SIMD-PACK-TYPE-ELEMENT-TYPE"
-           "*SIMD-PACK-ELEMENT-TYPES*")
+           "SIMD-PACK-TYPE-TAG-MASK"
+           "+SIMD-PACK-ELEMENT-TYPES+")
   #+sb-simd-pack-256
   (:export "SIMD-PACK-256-SINGLE"
            "SIMD-PACK-256-DOUBLE"
            "SIMD-PACK-256-INT"
            "SIMD-PACK-256-TYPE"
-           "SIMD-PACK-256-TYPE-ELEMENT-TYPE")
+           "SIMD-PACK-256-TYPE-TAG-MASK")
   #+sb-simd-pack-512
   (:export "SIMD-PACK-512-SINGLE"
            "SIMD-PACK-512-DOUBLE"
            "SIMD-PACK-512-INT"
            "SIMD-PACK-512-TYPE"
-           "SIMD-PACK-512-TYPE-ELEMENT-TYPE")
+           "SIMD-PACK-512-TYPE-TAG-MASK")
   #+long-float
   (:export "LONG-FLOAT-EXPONENT" "LONG-FLOAT-EXP-BITS"
            "LONG-FLOAT-HIGH-BITS" "LONG-FLOAT-LOW-BITS"
@@ -2991,7 +2998,9 @@ possibly temporarily, because it might be used internally.")
            "MAP-XSET"
            "XSET"
            "XSET-COUNT"
+           "XSET-ELTS-HASH"
            "XSET-EMPTY-P"
+           "XSET-EVERY"
            "XSET-INTERSECTION"
            "XSET-MEMBER-P"
            "XSET-MEMBERS"
@@ -3007,6 +3016,13 @@ possibly temporarily, because it might be used internally.")
            "SSET" "SSET-ELEMENT"
            "SSET-ADJOIN" "SSET-DELETE" "SSET-EMPTY" "SSET-COUNT"
            "SSET-MEMBER"
+
+           ;; key-only hash lookup which saves space over a hash-table
+           "MAKE-HASHSET" "HASHSET-INSERT" "HASHSET-REMOVE" "HASHSET-FIND"
+           "HASHSET-INSERT-IF-ABSENT" "HASHSET-COUNT"
+           ;; useful for DX keys that should persist to the heap
+           "SYS-COPY-STRUCT"
+           "ENSURE-HEAP-LIST"
 
             ;; communication between the runtime and Lisp
 
@@ -3067,7 +3083,8 @@ possibly temporarily, because it might be used internally.")
             ;; hash mixing operations
 
            "MIX" "MIXF" "WORD-MIX"
-           "GOOD-HASH-WORD->FIXNUM"
+           "MURMUR-HASH-WORD/FIXNUM"
+           "MURMUR-HASH-WORD/+FIXNUM"
 
             ;; Macroexpansion that doesn't touch special forms
 
@@ -3233,7 +3250,6 @@ possibly temporarily, because it might be used internally.")
            "COMMA-EXPR"
            "COMMA-KIND"
            "UNQUOTE"
-           "PACKAGE-HASHTABLE"
            "PACKAGE-ITER-STEP"
            "WITH-REBOUND-IO-SYNTAX"
            "WITH-SANE-IO-SYNTAX"

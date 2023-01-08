@@ -8,13 +8,17 @@
           arena-userdata
           new-arena
           destroy-arena
+          hide-arena
+          unhide-arena
           switch-to-arena
           rewind-arena
           unuse-arena
           thread-current-arena
           in-same-arena
           dump-arena-objects
+          arena-contents
           c-find-heap->arena
+          points-to-arena
           show-heap->arena))
 
 ;;; A contiguous block is described by 'struct arena_memblk' in C.
@@ -23,12 +27,6 @@
 (defmacro arena-memblk-limit (memblk) `(sap-ref-sap ,memblk ,(ash 1 word-shift)))
 (defmacro arena-memblk-next (memblk) `(sap-ref-sap ,memblk ,(ash 2 word-shift)))
 (defmacro arena-memblk-padword (memblk) `(sap-ref-sap ,memblk ,(ash 3 word-shift)))
-
-;;; Initial block holds a memblk (4 words) plus the arena structure itself,
-;;; and so the initial free pointer is immediately after those.
-;;; ARENA length must be rounded to even after adding the header, as is tradition.
-(defconstant memblk-preamble-size
-  (ash (+ (align-up (1+ (sb-kernel::type-dd-length arena)) 2) 4) word-shift))
 
 (defmacro do-arena-blocks ((blkvar arena) &body body)
   ;; bind BLK to a SAP pointing to successive 'struct memblk' in arena
@@ -47,19 +45,21 @@
   (when (arena-p (thread-current-arena))
     (switch-to-arena 0)))
 
+(define-load-time-global *arena-index-generator* 0)
+(declaim (fixnum *arena-index-generator*))
+(define-load-time-global *arena-lock* (sb-thread:make-mutex))
+
 ;;; Release all memblks back to the OS, except the first one associated with this arena.
 (defun rewind-arena (arena)
   #+system-tlabs
-  (let ((first (arena-first-block arena)))
-    (when (eql (arena-link arena) 0) ; never used
-      (return-from rewind-arena arena))
-    (alien-funcall (extern-alien "arena_release_memblks" (function void unsigned))
-                   (get-lisp-obj-address arena))
-    (let ((blk (int-sap first)))
-      (setf (arena-memblk-next blk) (int-sap 0) ; no next
-            (arena-memblk-freeptr blk) (sap+ blk memblk-preamble-size)))
-    (setf (arena-length arena) (arena-initial-size arena)
-          (arena-cookie arena) (cons t t)))
+  (cond ((= (arena-token arena) most-positive-word)
+         (bug "Arena token overflow. Need to implement double-precision count"))
+        ((eql (arena-link arena) 0)) ; never used - do nothing
+        (t
+         (alien-funcall (extern-alien "arena_release_memblks" (function void unsigned))
+                        (get-lisp-obj-address arena))
+         (setf (arena-bytes-wasted arena) 0)
+         (incf (arena-token arena))))
   arena)
 
 ;;; The arena structure has to be created in the arena,
@@ -74,43 +74,53 @@
 one or more times, not to exceed MAX-EXTENSIONS times"
   #-system-tlabs :placeholder
   #+system-tlabs
-  (let* ((memblk (sb-alien::%make-alien size)) ; use malloc()
-         (layout (find-layout 'arena))
-         ;; size of 'struct arena_memblk'
-         (struct-base (sap+ memblk (* 4 n-word-bytes))))
-    ;; This memory isn't pre-zeroed
-    (setf (sap-ref-word struct-base 0)
-          (compute-object-header (1+ (dd-length (wrapper-dd layout)))
-                                 instance-widetag))
-    (let ((arena (%make-lisp-obj (sap-int (sap+ struct-base instance-pointer-lowtag)))))
-      (%set-instance-layout arena layout)
-      (setf (arena-max-extensions arena) max-extensions
-            (arena-growth-amount arena) growth-amount)
-      (setf (arena-initial-size arena) size
-            (arena-growth-amount arena) growth-amount
-            (arena-max-extensions arena) max-extensions
-            (arena-length arena) size
-            (arena-extension-count arena) 0
-            (arena-pthr-mutex arena) 0
-            (arena-cookie arena) 0
-            (arena-link arena) 0
-            (arena-userdata arena) nil)
-      (setf (arena-memblk-freeptr memblk) (sap+ memblk memblk-preamble-size)
-            (arena-memblk-limit memblk) (sap+ memblk size)
-            (arena-memblk-next memblk) (int-sap 0)
-            (arena-memblk-padword memblk) (int-sap 0))
-      ;; Point the arena to its block
-      (setf (arena-first-block arena) (sap-int memblk)
-            (arena-current-block arena) (sap-int memblk))
-      (setf (arena-cookie arena) (cons t t)) ; any unique object
-      arena)))
+  (let ((layout (find-layout 'arena))
+        (index (with-system-mutex (*arena-lock*) (incf *arena-index-generator*)))
+        (arena (%make-lisp-obj
+                (alien-funcall (extern-alien "sbcl_new_arena" (function unsigned unsigned))
+                               size))))
+    (%set-instance-layout arena layout)
+    (setf (arena-max-extensions arena) max-extensions
+          (arena-growth-amount arena) growth-amount
+          (arena-max-extensions arena) max-extensions
+          (arena-index arena) index
+          (arena-hidden arena) nil
+          (arena-token arena) 1
+          (arena-userdata arena) nil)
+    arena))
 
-;;; Once destroyed, it is not legal to access the structure
-;;; since the structure itself is in the arena.
-;;; BUG: must unlink from arena chain. Not safe to use this yet.
+(eval-when (:compile-toplevel)
+;;; Caution: this vop potentially clobbers all registers, but it doesn't declare them.
+;;; It's safe to use only from DESTROY-ARENA which, being an ordinary full call,
+;;; is presumed not to preserve registers.
+(define-vop (delete-arena)
+  (:args (x :scs (descriptor-reg)))
+  (:temporary (:sc unsigned-reg :offset rdi-offset :from (:argument 0)) rdi)
+  #+immobile-space
+  (:temporary (:sc unsigned-reg :offset rbx-offset) rsp-save)
+  (:vop-var vop)
+  (:generator 1
+    (move rdi x)
+    #-immobile-space (inst break halt-trap)
+    #+immobile-space
+    (pseudo-atomic ()
+      (inst mov rsp-save rsp-tn)
+      (inst and rsp-tn -16) ; align as required by some ABIs
+      (inst call (make-fixup "sbcl_delete_arena" :foreign))
+      (inst mov rsp-tn rsp-save)))))
+
+;;; Destroy memory associated with ARENA, unlinking it from the global chain.
+;;; Note that we do not recycle arena IDs. It would be dangerous to do so, because a thread
+;;; might believe it has a valid TLAB in the deleted arena if it randomly matched on the
+;;; ID and token. That's a valid argument for making arena tokens gobally unique
+;;; (the way it used to work before I made tokens arena-specific)
 (defun destroy-arena (arena)
-  (deallocate-system-memory (arena-base-address arena) (arena-length arena))
-  nil)
+  ;; C is responsible for most of the cleanup.
+  (%primitive delete-arena arena)
+  ;; It is illegal to access the structure now, since that was in the arena.
+  ;; So return an arbitrary success indicator. It might happen that you can accidentally
+  ;; refer to the structure, but technically that constitutes a use-after-free bug.
+  t)
 
 (defmacro with-arena ((arena) &body body)
   (declare (ignorable arena))
@@ -170,7 +180,25 @@ one or more times, not to exceed MAX-EXTENSIONS times"
           ((not arena))
         (do-arena-blocks (memblk arena)
           (when (< (sap-int memblk) addr (sap-int (arena-memblk-freeptr memblk)))
-            (return arena)))))))
+            (return-from find-containing-arena arena)))))))
+
+(defun arena-mprotect (arena protect)
+  (alien-funcall (extern-alien "arena_mprotect" (function void unsigned int))
+                 (get-lisp-obj-address arena)
+                 (if protect 1 0))
+  arena)
+
+(defun hide-arena (arena)
+  (aver (not (arena-hidden arena)))
+  ;; Inform GC as of now not to look in the arena
+  (setf (arena-hidden arena) t)
+  (arena-mprotect arena t))
+(defun unhide-arena (arena)
+  (aver (arena-hidden arena))
+  (arena-mprotect arena nil)
+  ;; Inform GC as of now that it can look in the arena
+  (setf (arena-hidden arena) nil)
+  arena)
 
 (defun maybe-show-arena-switch (direction reason)
   (declare (ignore direction reason)))
@@ -199,6 +227,41 @@ one or more times, not to exceed MAX-EXTENSIONS times"
                (extern-alien "find_dynspace_to_arena_ptrs" (function int unsigned unsigned))
                (if arena (get-lisp-obj-address arena) 0)
                (get-lisp-obj-address result)))))
+    ;; The AVL tree of threads is keyed by THREAD-PRIMITIVE-THREAD, which is the base
+    ;; of each thread's TLS and above its binding stack. Therefore we need two separate
+    ;; FIND operations, one >= and one <=. Perhaps it would make sense to key by control stack base.
+    ;; FIXME: These functions should probably acquire 'all_threads_lock'. Even so, the entire
+    ;; entire mechanism is still slightly unsafe because the finder returns raw addresses.
+    (flet ((find-tls-ref (addr)
+             (binding* ((node (sb-thread::avl-find<= addr sb-thread::*all-threads*) :exit-if-null)
+                        (thread-sap (int-sap
+                                     (sb-thread::thread-primitive-thread
+                                      (sb-thread::avlnode-data node)))))
+               (when (and (<= (sap-int thread-sap) addr)
+                          (< addr (sap-int (sap+ thread-sap (ash *free-tls-index* n-fixnum-tag-bits)))))
+                 (let* ((tlsindex (sap- (int-sap addr) thread-sap))
+                        (symbol (symbol-from-tls-index tlsindex)))
+                   (list (sap-ref-lispobj thread-sap (ash thread-lisp-thread-slot word-shift))
+                         :tls symbol)))))
+           (find-binding (addr)
+             (binding* ((node (sb-thread::avl-find>= addr sb-thread::*all-threads*) :exit-if-null)
+                        (thread-sap (int-sap
+                                     (sb-thread::thread-primitive-thread
+                                      (sb-thread::avlnode-data node))))
+                        (bindstack-base
+                         (sap-ref-word thread-sap (ash thread-binding-stack-start-slot word-shift)))
+                        (bindstack-ptr
+                         (sap-ref-word thread-sap (ash thread-binding-stack-pointer-slot word-shift))))
+               (when (and (>= addr bindstack-base) (< addr bindstack-ptr))
+                 (let* ((tlsindex (sap-ref-word (int-sap addr) (- n-word-bytes)))
+                        (symbol (symbol-from-tls-index tlsindex)))
+                   (list (sap-ref-lispobj thread-sap (ash thread-lisp-thread-slot word-shift))
+                         :binding symbol))))))
+      (dotimes (i n)
+        (let ((element (aref result i)))
+          (when (fixnump element) ; it's a thread memory address
+            (let ((word (ash element n-fixnum-tag-bits)))
+              (setf (aref result i) (or (find-tls-ref word) (find-binding word))))))))
     (coerce (subseq result 0 n) 'list)))
 
 ;;; This global var is just for making 1 arena for testing purposes.
@@ -228,3 +291,35 @@ one or more times, not to exceed MAX-EXTENSIONS times"
       (dotimes (i 10) (sb-ext:atomic-push (cons 3 i) *foo*))
       (sb-thread:join-thread t1)
       (sb-thread:join-thread t2))))
+
+(defmethod print-object ((self arena) stream)
+  (print-unreadable-object (self stream :type t :identity t)
+    (format stream "id=~D used=~D waste=~D"
+            (arena-index self)
+            (arena-bytes-used self)
+            (arena-bytes-wasted self))))
+
+(defun copy-number-to-heap (n)
+  (declare (sb-c::tlab :system))
+  (named-let copy ((n n))
+    (if (or (typep n '(or fixnum single-float))
+            (and (typep n '(or bignum double-float (complex float)))
+                 (dynamic-space-obj-p n)))
+        n
+        (typecase n
+          (bignum (let* ((len (sb-bignum:%bignum-length n))
+                         (new (sb-bignum:%allocate-bignum len)))
+                    (dotimes (i len new)
+                      (declare (type sb-bignum:bignum-index i))
+                      (sb-bignum:%bignum-set new i (sb-bignum:%bignum-ref n i)))))
+          (double-float (%primitive sb-vm::!copy-dfloat n))
+          ;; ratio is dynspace-p only if both parts are. copy everything to be safe
+          (ratio (%make-ratio (truly-the integer (copy (%numerator n)))
+                              (truly-the integer (copy (%denominator n)))))
+          ;; Handle complex subtypes by hand so that a vop or IR2-converter is used
+          ((complex single-float) (complex (realpart n) (imagpart n)))
+          ((complex double-float) (complex (realpart n) (imagpart n)))
+          (complex ; same as RATIO
+           (%make-complex (truly-the rational (copy (%realpart n)))
+                          (truly-the rational (copy (%imagpart n)))))
+          (t (bug "~S is not a number" n))))))

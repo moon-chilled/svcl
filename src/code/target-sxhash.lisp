@@ -19,37 +19,6 @@
 ;;; a compound object.
 (defconstant +max-hash-depthoid+ 4)
 
-;; Return a number that increments by 1 for each word-pair allocation,
-;; barring complications such as exhaustion of the current page.
-;; The result is guaranteed to be a positive fixnum.
-(declaim (inline address-based-counter-val))
-(defun address-based-counter-val ()
-  (let ((word
-         ;; threads imply gencgc. use the per-thread alloc region pointer
-         #+sb-thread
-         (sap-int (sb-vm::current-thread-offset-sap sb-vm::thread-mixed-tlab-slot))
-         #+(and (not sb-thread) cheneygc)
-         (sap-int (dynamic-space-free-pointer))
-         ;; dynamic-space-free-pointer increments only when a page is full.
-         ;; Using mixed_region directly is finer-grained.
-         #+(and (not sb-thread) gencgc)
-         (sb-sys:sap-ref-word (sb-sys:int-sap sb-vm::mixed-region) 0)))
-    ;; counter should increase by 1 for each cons cell allocated
-    (ash word (- (1+ sb-vm:word-shift)))))
-
-;;; Return some bits that are dependent on the next address that will be
-;;; allocated, mixed with the previous state (in case addresses get recycled).
-;;; This algorithm, used for stuffing a hash-code into instances of CTYPE
-;;; subtypes and generic functions, is simpler than RANDOM.
-;;; I don't know whether it is more random or less random than a PRNG,
-;;; but it's faster.
-(defun quasi-random-address-based-hash (state mask)
-  (declare (type (simple-array (and fixnum unsigned-byte) (1)) state))
-  ;; Ok with multiple threads - No harm, no foul.
-  (logand (setf (aref state 0) (mix (address-based-counter-val) (aref state 0)))
-          mask))
-
-
 ;;; This is an out-of-line callable entrypoint that the compiler can
 ;;; transform SXHASH into when hashing a non-simple string.
 (defun %sxhash-string (x)
@@ -111,7 +80,7 @@
                    #+sb-thread (%primitive sb-vm::set-instance-hashed instance))
                  (get-lisp-obj-address instance))))
     ;; perturb the address
-    (logand (murmur3-fmix-word addr) most-positive-fixnum)))
+    (murmur-hash-word/+fixnum addr)))
 
 (declaim (inline instance-sxhash))
 (defun instance-sxhash (instance)
@@ -138,7 +107,8 @@
        ;; There is not more entropy imparted by doing a mix step on a value that had
        ;; at most 32 bits of randomness, but this makes more of the bits vary.
        ;; Some uses of the hash might expect the high bits to have randomness in them.
-       (logand (murmur-fmix-word hash) most-positive-fixnum)))
+       ;; This returns a positive fixnum to conform with the requirement on SXHASH.
+       (murmur-hash-word/+fixnum hash)))
    #-compact-instance-header
    (sb-pcl::standard-funcallable-instance-hash-code
     (truly-the sb-pcl::standard-funcallable-instance fin))))
@@ -280,8 +250,7 @@
 
 (defun sap-hash (x)
   ;; toss in a LOGNOT so that (the word a) and (int-sap a) hash differently
-  (let ((w (logand (lognot (sap-int x)) most-positive-word)))
-    (logand (murmur3-fmix-word w) most-positive-fixnum)))
+  (murmur-hash-word/+fixnum (logand (lognot (sap-int x)) most-positive-word)))
 
 (defun sxhash (x)
   ;; profiling SXHASH is hard, but we might as well try to make it go

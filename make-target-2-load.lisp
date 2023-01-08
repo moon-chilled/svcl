@@ -6,6 +6,8 @@
 (defvar *compile-files-p* nil)
 (load (merge-pathnames "src/cold/warm.lisp" *load-pathname*))
 
+(sb-impl::!recompile-globaldb-checkfuns)
+
 ;;; Users don't want to know if there are multiple TLABs per se, but they do want
 ;;; to know if NEW-ARENA returns an arena, so give them a sensible feature name.
 #+system-tlabs (push :arena-allocator *features*)
@@ -356,9 +358,6 @@ Please check that all strings which were not recognizable to the compiler
 
 ;;; The system is complete now, all standard functions are
 ;;; defined.
-;;; The call to CTYPE-OF-CACHE-CLEAR is probably redundant.
-;;; SAVE-LISP-AND-DIE calls DEINIT which calls DROP-ALL-HASH-CACHES.
-(sb-kernel::ctype-of-cache-clear)
 
 ;;; In case there is xref data for internals, repack it here to
 ;;; achieve a more compact encoding.
@@ -413,6 +412,7 @@ Please check that all strings which were not recognizable to the compiler
            (member symbol '(sb-vm::map-referencing-objects
                             sb-vm::map-stack-references
                             sb-vm::reconstitute-object
+                            sb-vm::points-to-arena
                             ;; need this for defining a vop which
                             ;; tests the x86-64 allocation profiler
                             sb-vm::pseudo-atomic

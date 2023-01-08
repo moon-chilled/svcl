@@ -98,7 +98,7 @@
   (assert (= 0.0d0 (scale-float 1.0d0 (1- most-negative-fixnum)))))
 
 (with-test (:name (:scale-float-overflow :bug-372)
-            :fails-on (or :arm64))
+            :fails-on (and :arm64 (not :darwin)))
   (flet ((test (form)
            (assert-error (funcall (checked-compile `(lambda () ,form)
                                                    :allow-style-warnings t))
@@ -133,9 +133,9 @@
     (mapc #'test '(sin cos tan))))
 
 (with-test (:name (:addition-overflow :bug-372)
-            :fails-on (or :arm64
-                        (and :ppc :openbsd)
-                        (and :x86 :netbsd)))
+            :fails-on (or (and :arm64 (not :darwin))
+                          (and :ppc :openbsd)
+                          (and :x86 :netbsd)))
   (assert-error
    (sb-sys:without-interrupts
      (sb-int:set-floating-point-modes :current-exceptions nil
@@ -153,9 +153,9 @@
 ;; the preceeding "pure" test files aren't as free of side effects as
 ;; we might like.
 (with-test (:name (:addition-overflow :bug-372 :take-2)
-            :fails-on (or :arm64
-                        (and :ppc :openbsd)
-                        (and :x86 :netbsd)))
+            :fails-on (or (and :arm64 (not :darwin))
+                          (and :ppc :openbsd)
+                          (and :x86 :netbsd)))
   (assert-error
    (sb-sys:without-interrupts
      (sb-int:set-floating-point-modes :current-exceptions nil
@@ -275,11 +275,11 @@
 
 ;; Leakage from the host could result in wrong values for truncation.
 (with-test (:name :truncate)
-  (assert (plusp (sb-kernel:%unary-truncate/single-float (expt 2f0 33))))
-  (assert (plusp (sb-kernel:%unary-truncate/double-float (expt 2d0 33))))
+  (assert (plusp (sb-kernel:%unary-truncate (expt 2f0 33))))
+  (assert (plusp (sb-kernel:%unary-truncate (expt 2d0 33))))
   ;; That'd be one strange host, but just in case
-  (assert (plusp (sb-kernel:%unary-truncate/single-float (expt 2f0 65))))
-  (assert (plusp (sb-kernel:%unary-truncate/double-float (expt 2d0 65)))))
+  (assert (plusp (sb-kernel:%unary-truncate (expt 2f0 65))))
+  (assert (plusp (sb-kernel:%unary-truncate (expt 2d0 65)))))
 
 ;; On x86-64, we sometimes forgot to clear the higher order bits of the
 ;; destination register before using it with an instruction that doesn't
@@ -751,3 +751,7 @@
                                  (declare ((double-float 10d0 30d0) f))
                                  (values (truncate f)))))))
              '(integer 10 30))))
+
+(with-test (:name :rational-not-bignum)
+  (assert (equal (type-of (eval '(rational -4.3973217e12)))
+                 (type-of -4397321682944))))

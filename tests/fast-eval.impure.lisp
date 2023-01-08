@@ -221,10 +221,15 @@
   ;; This works due to short-circuiting within TYPEP
   (let ((x 3)) (declare (type (or integer blurf) x)) x)
 
-  ;; This fails because the unknown type is tested first
+  ;; This fails under a naive OR type parser, but a different parse might
+  ;; equate (OR BLURF INTEGER) with (OR INTEGER BLURF), which just worked fine in the
+  ;; previous test, or could force known types to appear to the left of unknowns
+  ;; in a union. So even dropping the values-specifier-type cache may not make this fail.
+  ;; I'm keeping it in case I change my mind again though.
+  #+nil
   (handler-case (let ((x 3)) (declare (type (or blurf integer) x)) x)
     (simple-error ()) ; "unknown type"
-    (:no-error () "Expected an ERROR")))
+    (:no-error (&rest ignore) (error "Expected an ERROR"))))
 
 (test-util:with-test (:name :tagbody-if-optimizer)
   (assert

@@ -24,7 +24,6 @@
  (sb-mop:class-finalized-p
   sb-mop:class-prototype
   sb-mop:class-slots
-  sb-pcl::eql-specializer-to-ctype
   sb-pcl::try-finalize-inheritance
   sb-mop:finalize-inheritance
   sb-mop:generic-function-name
@@ -38,6 +37,7 @@
   sb-mop:slot-definition-allocation
   sb-mop:slot-definition-name
   sb-pcl::slot-accessor-std-p
+  slot-missing
   slot-unbound
   sb-pcl::specializer-applicable-using-type-p
   sb-pcl::specializer-class-or-nil

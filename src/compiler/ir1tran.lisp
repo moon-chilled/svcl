@@ -164,7 +164,13 @@
               ;; FIXME: this seems to omit FUNCTIONAL
               (when (defined-fun-p fun)
                 (return-from fun-lexically-notinline-p
-                  (eq (defined-fun-inlinep fun) 'notinline))))))))
+                  (eq (defined-fun-inlinep fun) 'notinline)))
+              (loop for data in (lexenv-user-data env)
+                    when (and (eq (car data) 'no-compiler-macro)
+                              (eq (cdr data) name))
+                    do
+                    (return-from fun-lexically-notinline-p
+                      t)))))))
     ;; If ANSWER is NIL, go for the global value
     (eq (or answer (info :function :inlinep name)) 'notinline)))
 
@@ -310,7 +316,13 @@
                        (type (type-specifier (info :variable :type name))))
                    `(macro . (the ,type ,expansion))))
                 (:constant
-                 (find-constant (symbol-value name) name))
+                 (let ((value (symbol-value name)))
+                   ;; Objects that are freely coalescible become
+                   ;; anonymous since we aren't interested in
+                   ;; accessing them through their name.
+                   (if (sb-xc:typep value '(or number character symbol))
+                       (find-constant value)
+                       (make-constant value (ctype-of value) name))))
                 (t
                  (make-global-var :kind kind
                                   :%source-name name
@@ -544,8 +556,12 @@
       (declare (fixnum pos))
       (macrolet ((frob ()
                    `(progn
-                      (when (atom subform) (return))
-                      (let ((fm (car subform)))
+                      (let ((fm (cond ((comma-p subform)
+                                       (comma-expr subform))
+                                      ((atom subform)
+                                       (return))
+                                      (t
+                                       (car subform)))))
                         (when (comma-p fm)
                           (setf fm (comma-expr fm)))
                         (cond ((consp fm)
@@ -563,6 +579,8 @@
                                ;; perfect, but better than nothing.
                                (note-source-path subform pos path)))
                         (incf pos))
+                      (when (comma-p subform)
+                        (return))
                       (setq subform (cdr subform))
                       (when (eq subform trail) (return)))))
         (loop
@@ -691,9 +709,6 @@
     (etypecase var
       (leaf
        (when (lambda-var-p var)
-         (let ((home (ctran-home-lambda-or-null start)))
-           (when (and home (neq (lambda-var-home var) home))
-             (sset-adjoin var (lambda-calls-or-closes home))))
          (when (lambda-var-ignorep var)
            ;; (ANSI's specification for the IGNORE declaration requires
            ;; that this be a STYLE-WARNING, not a full WARNING.)
@@ -1340,8 +1355,8 @@
     (when (defined-fun-p var)
       (setf (defined-fun-inline-expansion res)
             (defined-fun-inline-expansion var))
-      (setf (defined-fun-functionals res)
-            (defined-fun-functionals var))
+      (setf (defined-fun-functional res)
+            (defined-fun-functional var))
       (setf (defined-fun-same-block-p res)
             (defined-fun-same-block-p var)))
     ;; FIXME: Is this really right? Needs we not set the FUNCTIONAL
@@ -1462,7 +1477,7 @@ the stack without triggering overflow protection.")
 (defun process-extent-decl (names vars fvars kind)
   (let ((extent
           (ecase kind
-            (dynamic-extent
+            ((dynamic-extent dynamic-extent-no-note)
              (when *stack-allocate-dynamic-extent*
                kind))
             ((indefinite-extent truly-dynamic-extent)
@@ -1553,6 +1568,11 @@ the stack without triggering overflow protection.")
         (process-ftype-decl (second spec) res (cddr spec) fvars context))
        ((inline notinline maybe-inline)
         (process-inline-decl spec res fvars))
+       (no-compiler-macro
+        (make-lexenv :default res
+                     :user-data (list*
+                                 (cons 'no-compiler-macro (second spec))
+                                 (lexenv-user-data res))))
        (optimize
         (multiple-value-bind (new-policy specified-qualities)
             (process-optimize-decl spec (lexenv-policy res))
@@ -1568,7 +1588,7 @@ the stack without triggering overflow protection.")
          :default res
          :handled-conditions (process-unmuffle-conditions-decl
                               spec (lexenv-handled-conditions res))))
-       ((dynamic-extent truly-dynamic-extent indefinite-extent)
+       ((dynamic-extent truly-dynamic-extent indefinite-extent dynamic-extent-no-note)
         (process-extent-decl (cdr spec) vars fvars (first spec))
         res)
        ((disable-package-locks enable-package-locks)
@@ -1814,7 +1834,7 @@ the stack without triggering overflow protection.")
                     :inlinep (defined-fun-inlinep var)
                     :inline-expansion (defined-fun-inline-expansion var)
                     :same-block-p (defined-fun-same-block-p var)
-                    :functionals (defined-fun-functionals var))
+                    :functional (defined-fun-functional var))
                    (make-global-var :%source-name name :type type
                                     :where-from :declared :kind kind))))
        (when (defined-fun-p var)

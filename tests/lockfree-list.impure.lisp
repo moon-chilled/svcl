@@ -181,13 +181,7 @@
 
 (test-util:with-test (:name :lockfree-list-performance
                       :skipped-on :sbcl)
-  (let ((cpus
-          (max 1
-               #-win32 (sb-alien:alien-funcall
-                        (sb-alien:extern-alien "sysconf"
-                                               (function sb-alien:long sb-alien:int))
-                        sb-unix::sc-nprocessors-onln)
-               #+win32 (sb-alien:extern-alien "os_number_of_processors" sb-alien:int))))
+  (let ((cpus test-util:*n-cpus*))
     (assert (> (primitive-benchmark) (min 2 (log cpus 2))))))
 
 (test-util:with-test (:name :lfl-next-implicit-pin-one-more-time)
@@ -420,7 +414,7 @@
 (defun get-test-strings (package-name)
   (map 'list #'string
    (remove-if-not #'symbolp
-                  (sb-impl::package-hashtable-cells
+                  (sb-impl::symtbl-cells
                    (sb-impl::package-internal-symbols
                     (find-package package-name))))))
 

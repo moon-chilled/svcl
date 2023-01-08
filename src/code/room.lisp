@@ -1026,6 +1026,27 @@ We could try a few things to mitigate this:
      win
        (return-from references-p t))))
 
+;;; If OBJ points (directly or indirectly) to something in some arena,
+;;; then return the pointed-to arena-allocated thing.
+;;; Cribbed from DEEP-SIZE in tests/do-refs.impure
+#+system-tlabs
+(defun points-to-arena (obj)
+  (flet ((leafp (x) (typep x '(or package symbol fdefn wrapper classoid))))
+    (let ((worklist (list obj))
+          (seen (make-hash-table :test 'eq)))
+      (setf (gethash obj seen) t)
+      (flet ((visit (thing)
+               (when (is-lisp-pointer (get-lisp-obj-address thing))
+                 (unless (or (leafp thing) (gethash thing seen))
+                   (when (find-containing-arena (get-lisp-obj-address thing))
+                     (return-from points-to-arena thing))
+                   (push thing worklist)
+                   (setf (gethash thing seen) t)))))
+        (loop
+          (unless worklist (return))
+          (let ((x (pop worklist)))
+            (do-referenced-object (x visit))))))))
+
 ;;; This interface allows one either to be agnostic of the referencing space,
 ;;; or specify exactly one space, but not specify a list of spaces.
 ;;; An upward-compatible change would be to assume a list, and call ENSURE-LIST.
@@ -1246,6 +1267,16 @@ We could try a few things to mitigate this:
 ;;; this is a valid test that genesis separated code and data.
 (!ensure-genesis-code/data-separation)
 
+;;; Make sure that every KEY-INFO is in the hashset.
+;;; We don't dump any from genesis, which is a good thing.
+(let ((cache
+       (sb-impl::hss-cells
+        (sb-impl::hashset-storage sb-kernel::*key-info-hashset*)))
+      (list
+       (list-allocated-objects :all :type instance-widetag
+                                    :test #'sb-kernel:key-info-p)))
+  (dolist (x list) (aver (find x cache))))
+
 #+sb-thread
 (defun show-tls-map ()
   (let ((list
@@ -1356,6 +1387,24 @@ We could try a few things to mitigate this:
              (*print-array* nil))
         (format t "g~d ~a ~a~%" (sb-kernel:generation-of v) v code)))))
 
+#+sb-thread
+(defun symbol-from-tls-index (index)
+  ;; Possible TODO: a weak vector indexed by symbol would make this function
+  ;; more quick, more reliable, and also maybe make it easier to recycle TLS indices
+  (unless (zerop index)
+    ;; Search interned symbols first since that's probably enough
+    (do-all-symbols (symbol)
+      (when (= (symbol-tls-index symbol) index)
+        (return-from symbol-from-tls-index symbol)))
+    ;; A specially bound uninterned symbol? how awesome
+    (map-allocated-objects
+     (lambda (obj type size)
+       (declare (ignore size))
+       (when (and (= type symbol-widetag) (= (symbol-tls-index obj) index))
+         (return-from symbol-from-tls-index obj)))
+     :all))
+  0) ; Return a non-symbol as the failure indicator
+
 #+system-tlabs
 (progn
 (export 'find-arena-ptr)
@@ -1376,26 +1425,10 @@ We could try a few things to mitigate this:
 
 (defun show-heap->arena (l)
   (dolist (x l)
-    (cond ((fixnump x) ; it's an address in TLS
-           (aver (not (zerop x)))
-           ;; x is off by N-FIXNUM-TAG-BITS because it was written as a raw address
-           ;; but accessed as a lispobj
-           (let* ((addr (ash x n-fixnum-tag-bits))
-                  (pointee (sap-ref-lispobj (int-sap addr) 0))
-                  (avlnode (the (not null)
-                                (sb-thread::avl-find<= addr sb-thread::*all-threads*)))
-                  (thread-base
-                   (sb-thread::avlnode-key avlnode))
-                  (offset (- addr thread-base))
-                  ;; FIXME: put FIND-SYMBOL-FROM-TLS-INDEX somewhere reasonable
-                  (symbol (funcall 'sb-impl::find-symbol-from-tls-index offset))
-                  (thread (sb-thread::avlnode-data avlnode)))
-             (format t "~x -> ~x ~s (TLS: ~/sb-ext:print-symbol-with-prefix/ in ~S)~%"
-                     addr
-                     (get-lisp-obj-address pointee)
-                     (type-of pointee)
-                     symbol
-                     (sb-thread:thread-name thread))))
+    (cond ((typep x '(cons sb-thread:thread))
+           ;; It's tricky to figure out what a symbol in another thread pointed to,
+           ;; so just show the symbol and hope the user knows what it's for.
+           (format t "~&Symbol ~/sb-ext:print-symbol-with-prefix/~%" (third x)))
           (t
            (let ((pointee (nth-value 1 (find-arena-ptr x))))
              (format t "~x -> ~x ~s ~s~%"
@@ -1404,9 +1437,11 @@ We could try a few things to mitigate this:
                      (type-of x)
                      (type-of pointee)))))))
 
+(macrolet ((aligned-base (blk)
+             `(align-up (sap-int (sap+ ,blk (* 4 n-word-bytes))) 4096)))
 (defun dump-arena-objects (arena &aux (tot-size 0))
   (do-arena-blocks (memblk arena)
-    (let ((from (sap-int memblk) )
+    (let ((from (aligned-base memblk))
           (to (sap-int (arena-memblk-freeptr memblk))))
       (format t "~&Memory block ~X..~X~%" from to)
       (map-objects-in-range
@@ -1414,10 +1449,33 @@ We could try a few things to mitigate this:
          (declare (ignore type))
          (incf tot-size size)
          (format t "~x ~s~%" (get-lisp-obj-address obj) (type-of obj)))
-       (make-lisp-obj from)
-       (make-lisp-obj to))))
+       (%make-lisp-obj from)
+       (%make-lisp-obj to))))
   tot-size)
-)
+(defun arena-contents (arena)
+  (let ((count 0))
+    (do-arena-blocks (memblk arena)
+      (let ((base (aligned-base memblk))
+            (limit (sap-int (arena-memblk-freeptr memblk))))
+        (map-objects-in-range
+         (lambda (obj widetag size)
+           (declare (ignore obj widetag size))
+           (incf count))
+         (%make-lisp-obj base)
+         (%make-lisp-obj limit))))
+    (let ((result (make-array count))
+          (index 0))
+      (do-arena-blocks (memblk arena)
+        (let ((base (aligned-base memblk))
+              (limit (sap-int (arena-memblk-freeptr memblk))))
+          (map-objects-in-range
+           (lambda (obj widetag size)
+             (declare (ignore widetag size))
+             (setf (aref result index) obj)
+             (incf count))
+           (%make-lisp-obj base)
+           (%make-lisp-obj limit))))
+      result)))))
 
 (in-package "SB-C")
 ;;; As soon as practical in warm build it makes sense to add
