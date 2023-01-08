@@ -1148,7 +1148,8 @@
                ;; The set of type-classes for which not EQ implies not TYPE=.
                (loop for class in '(character-set classoid member named
                                     #+sb-simd-pack simd-pack
-                                    #+sb-simd-pack-256 simd-pack-256)
+                                    #+sb-simd-pack-256 simd-pack-256
+                                    #+sb-simd-pack-512 simd-pack-512)
                      sum (ash 1 (type-class-name->id class))))
              (quick-fail-complex-= ()
                ;; Fail if neither arg is in a class that defines a COMPLEX-= method

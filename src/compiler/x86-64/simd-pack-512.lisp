@@ -65,7 +65,7 @@
     (cond ((= p0 p1 p2 p3 p4 p5 p6 p7 0)
            (inst vxorps y y y))
           ((= p0 p1 p2 p3 p4 p5 p6 p7 (ldb (byte 64 0) -1))
-           (inst vpternlogd y y y #xff))
+           (inst vpternlogd y y y #xff)) ; todo should be vternlogps?
           (t
            (inst vmovups y (register-inline-constant x))))))
 
@@ -119,7 +119,7 @@
                             (inst vmovdqu64 ea x)))))
                   (define-move-vop ,name :move
                     ,scs (descriptor-reg))))))
-  ;; see *simd-pack-element-types*
+  ;; see +simd-pack-element-types+
   (define-move-from-avx512 simd-pack-512-single 0 single-avx512-reg)
   (define-move-from-avx512 simd-pack-512-double 1 double-avx512-reg)
   (define-move-from-avx512 simd-pack-512-ub8 2 int-avx512-reg)
@@ -237,7 +237,7 @@
   (:node-var node)
   (:generator 13
     (alloc-other simd-pack-512-widetag simd-pack-512-size dst node nil thread-tn)
-    ;; see *simd-pack-element-types*
+    ;; see +simd-pack-element-types+
     (storew tag dst simd-pack-512-tag-slot other-pointer-lowtag)
     (storew p0 dst simd-pack-512-p0-slot other-pointer-lowtag)
     (storew p1 dst simd-pack-512-p1-slot other-pointer-lowtag)
@@ -281,9 +281,9 @@
   (check-type pack symbol)
   `(let ((,pack ,pack))
      (etypecase ,pack
-       ,@(mapcar (lambda (eltype)
-                   `((simd-pack-512 ,eltype) ,@body))
-          *simd-pack-element-types*))))
+       ,@(map 'list (lambda (eltype)
+                      `((simd-pack-512 ,eltype) ,@body))
+          +simd-pack-element-types+))))
 
 #-sb-xc-host
 (macrolet ((unpack-unsigned (pack bits)
@@ -367,7 +367,7 @@
   (defun %make-simd-pack-512-ub32 (p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15)
     (declare (type (unsigned-byte 32) p0 p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15))
     (%make-simd-pack-512
-     #.(position '(unsigned-byte 32) *simd-pack-element-types* :test #'equal)
+     #.(position '(unsigned-byte 32) +simd-pack-element-types+ :test #'equal)
      (logior p0 (ash p1 32))
      (logior p2 (ash p3 32))
      (logior p4 (ash p5 32))

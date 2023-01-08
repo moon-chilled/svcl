@@ -340,6 +340,8 @@
       (simd-pack     simd-pack-type)
       #+sb-simd-pack-256
       (simd-pack-256 simd-pack-256-type)
+      #+sb-simd-pack-512
+      (simd-pack-512 simd-pack-512-type)
       ;; clearly alien-type-type is not consistent with the (FOO FOO-TYPE) theme
       (alien         alien-type-type)))
   (defun ctype-instance->type-class (name)
@@ -735,7 +737,7 @@
                           ,(ecase name ; Compute or propagate the flag bits
                              (hairy-type ctype-contains-hairy)
                              (unknown-type (logior ctype-contains-unknown ctype-contains-hairy))
-                             ((simd-pack-type simd-pack-256-type alien-type-type) 0)
+                             ((simd-pack-type simd-pack-256-type simd-pack-512-type alien-type-type) 0)
                              (negation-type '(type-flags type))
                              (array-type '(type-flags element-type)))
                           ,@(cdr private-ctor-args))))))))
@@ -1236,13 +1238,12 @@
               (not (eql 0)))))
 
 #+sb-simd-pack-512
-(defstruct (simd-pack-512-type
-            (:include ctype (%bits (pack-ctype-bits simd-pack-512)))
-            (:constructor %make-simd-pack-512-type (element-type))
-            (:copier nil))
-  (element-type (missing-arg)
-   :type (simple-bit-vector #.(length *simd-pack-element-types*))
-   :read-only t))
+(def-type-model (simd-pack-512-type
+                 (:constructor* %make-simd-pack-512-type (tag-mask)))
+  (tag-mask (missing-arg)
+   :test =
+   :type (and (unsigned-byte #.(length +simd-pack-element-types+))
+              (not (eql 0)))))
 
 (declaim (ftype (sfunction (ctype ctype) (values t t)) csubtypep))
 ;;; Look for nice relationships for types that have nice relationships
@@ -1372,7 +1373,7 @@
                             (get-lisp-obj-address instance)))))))
         (etypecase instance
           ((or numeric-type member-type character-set-type ; nothing extra to do
-           #+sb-simd-pack simd-pack-type #+sb-simd-pack-256 simd-pack-256-type
+           #+sb-simd-pack simd-pack-type #+sb-simd-pack-256 simd-pack-256-type #+sb-simd-pack-512 simd-pack-512-type
            hairy-type))
           (args-type
            (ensure-interned-list (args-type-required instance) *ctype-list-hashset*)
@@ -1624,6 +1625,8 @@
         (simd-pack-type (!alloc-simd-pack-type bits (simd-pack-type-tag-mask x)))
         #+sb-simd-pack-256
         (simd-pack-256-type (!alloc-simd-pack-256-type bits (simd-pack-256-type-tag-mask x)))
+        #+sb-simd-pack-512
+        (simd-pack-512-type (!alloc-simd-pack-512-type bits (simd-pack-512-type-tag-mask x)))
         (alien-type-type (!alloc-alien-type-type bits (alien-type-type-alien-type x)))))))
 
 ;;; Drop NILs, possibly reducing the storage vector length
