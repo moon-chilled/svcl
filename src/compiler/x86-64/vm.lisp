@@ -214,6 +214,9 @@
   #+sb-simd-pack-256 (int-avx2-immediate immediate-constant)
   #+sb-simd-pack-256 (double-avx2-immediate immediate-constant)
   #+sb-simd-pack-256 (single-avx2-immediate immediate-constant)
+  #+sb-simd-pack-512 (int-avx512-immediate immediate-constant)
+  #+sb-simd-pack-512 (double-avx512-immediate immediate-constant)
+  #+sb-simd-pack-512 (single-avx512-immediate immediate-constant)
   (immediate immediate-constant)
 
   ;;
@@ -244,6 +247,12 @@
   (double-avx2-stack stack :element-size 4)
   #+sb-simd-pack-256
   (single-avx2-stack stack :element-size 4)
+  #+sb-simd-pack-512
+  (int-avx512-stack stack :element-size 8)
+  #+sb-simd-pack-512
+  (double-avx512-stack stack :element-size 8)
+  #+sb-simd-pack-512
+  (single-avx512-stack stack :element-size 8)
 
   ;;
   ;; magic SCs
@@ -371,6 +380,25 @@
                   :constant-scs (single-avx2-immediate)
                   :save-p t
                   :alternate-scs (single-avx2-stack))
+  (zmm-reg float-registers :locations #.*float-regs*)
+  #+sb-simd-pack-512
+  (int-avx512-reg float-registers
+               :locations #.*float-regs*
+               :constant-scs (int-avx512-immediate)
+               :save-p t
+               :alternate-scs (int-avx512-stack))
+  #+sb-simd-pack-512
+  (double-avx512-reg float-registers
+                  :locations #.*float-regs*
+                  :constant-scs (double-avx512-immediate)
+                  :save-p t
+                  :alternate-scs (double-avx512-stack))
+  #+sb-simd-pack-512
+  (single-avx512-reg float-registers
+                  :locations #.*float-regs*
+                  :constant-scs (single-avx512-immediate)
+                  :save-p t
+                  :alternate-scs (single-avx512-stack))
 
   (catch-block stack :element-size catch-block-size)
   (unwind-block stack :element-size unwind-block-size)))
@@ -392,7 +420,10 @@
                                  int-sse-stack single-sse-stack double-sse-stack))
 #+sb-simd-pack-256
 (defparameter *hword-sc-names* '(ymm-reg int-avx2-reg single-avx2-reg double-avx2-reg
-                                   int-avx2-stack single-avx2-stack double-avx2-stack))
+                                 int-avx2-stack single-avx2-stack double-avx2-stack))
+#+sb-simd-pack-512
+(defparameter *zword-sc-names* '(zmm-reg int-avx512-reg single-avx512-reg double-avx512-reg
+                                 int-avx512-stack single-avx512-stack double-avx512-stack))
 ) ; EVAL-WHEN
 (!define-storage-classes
   . #.(mapcar (lambda (class-spec)
@@ -402,6 +433,8 @@
                           (#.*oword-sc-names*   :oword)
                           #+sb-simd-pack-256
                           (#.*hword-sc-names*   :hword)
+                          #+sb-simd-pack-512
+                          (#.*zword-sc-names*   :zword)
                           (#.*qword-sc-names*   :qword)
                           (#.*float-sc-names*   :float)
                           (#.*double-sc-names*  :double)
@@ -517,7 +550,13 @@
     #+(and sb-simd-pack-256 (not sb-xc-host))
     ((simd-pack-256 single-float) single-avx2-immediate-sc-number)
     #+(and sb-simd-pack-256 (not sb-xc-host))
-    (simd-pack-256 int-avx2-immediate-sc-number)))
+    (simd-pack-256 int-avx2-immediate-sc-number)
+    #+(and sb-simd-pack-512 (not sb-xc-host))
+    ((simd-pack-512 double-float) double-avx512-immediate-sc-number)
+    #+(and sb-simd-pack-512 (not sb-xc-host))
+    ((simd-pack-512 single-float) single-avx512-immediate-sc-number)
+    #+(and sb-simd-pack-512 (not sb-xc-host))
+    (simd-pack-512 int-avx512-immediate-sc-number)))
 
 (defun boxed-immediate-sc-p (sc)
   (eql sc immediate-sc-number))

@@ -455,6 +455,22 @@ during backtrace.
   (p2 :c-type "long" :type (unsigned-byte 64))
   (p3 :c-type "long" :type (unsigned-byte 64)))
 
+#+sb-simd-pack-512
+(define-primitive-object (simd-pack-512
+                          :lowtag other-pointer-lowtag
+                          :widetag simd-pack-512-widetag)
+  (tag :ref-trans %simd-pack-512-tag
+       :attributes (movable flushable)
+       :type fixnum)
+  (p0 :c-type "long" :type (unsigned-byte 64))
+  (p1 :c-type "long" :type (unsigned-byte 64))
+  (p2 :c-type "long" :type (unsigned-byte 64))
+  (p3 :c-type "long" :type (unsigned-byte 64))
+  (p4 :c-type "long" :type (unsigned-byte 64))
+  (p5 :c-type "long" :type (unsigned-byte 64))
+  (p6 :c-type "long" :type (unsigned-byte 64))
+  (p7 :c-type "long" :type (unsigned-byte 64)))
+
 ;;; Define some slots that precede 'struct thread' so that each may be read
 ;;; using a small negative 1-byte displacement.
 ;;; These slots hold frequently-referenced constants.

@@ -884,6 +884,15 @@
    :type (simple-bit-vector #.(length *simd-pack-element-types*))
    :read-only t))
 
+#+sb-simd-pack-512
+(defstruct (simd-pack-512-type
+            (:include ctype (%bits (pack-ctype-bits simd-pack-512)))
+            (:constructor %make-simd-pack-512-type (element-type))
+            (:copier nil))
+  (element-type (missing-arg)
+   :type (simple-bit-vector #.(length *simd-pack-element-types*))
+   :read-only t))
+
 (declaim (ftype (sfunction (ctype ctype) (values t t)) csubtypep))
 ;;; Look for nice relationships for types that have nice relationships
 ;;; only when one is a hierarchical subtype of the other.

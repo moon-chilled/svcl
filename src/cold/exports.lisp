@@ -648,7 +648,20 @@ structure representations")
    "SIMD-PACK-256-P2-SLOT"
    "SIMD-PACK-256-P3-SLOT"
    "SIMD-PACK-256-SIZE"
-   "SIMD-PACK-256-WIDETAG"))
+   "SIMD-PACK-256-WIDETAG")
+  #+sb-simd-pack-512
+  (:export
+   "SIMD-PACK-512-TAG-SLOT"
+   "SIMD-PACK-512-P0-SLOT"
+   "SIMD-PACK-512-P1-SLOT"
+   "SIMD-PACK-512-P2-SLOT"
+   "SIMD-PACK-512-P3-SLOT"
+   "SIMD-PACK-512-P4-SLOT"
+   "SIMD-PACK-512-P5-SLOT"
+   "SIMD-PACK-512-P6-SLOT"
+   "SIMD-PACK-512-P7-SLOT"
+   "SIMD-PACK-512-SIZE"
+   "SIMD-PACK-512-WIDETAG"))
 
 (defpackage* "SB-DISASSEM"
   (:documentation "private: stuff related to the implementation of the disassembler")
@@ -1143,7 +1156,25 @@ like *STACK-TOP-HINT* and unsupported stuff like *TRACED-FUN-LIST*.")
    "%SIMD-PACK-256-SB32S"
    "%SIMD-PACK-256-SB64S"
    "%SIMD-PACK-256-DOUBLES"
-   "%SIMD-PACK-256-SINGLES"))
+   "%SIMD-PACK-256-SINGLES")
+  #+sb-simd-pack-512
+  (:export
+   "SIMD-PACK-512"
+   "SIMD-PACK-512-P"
+   "%MAKE-SIMD-PACK-512-UB32"
+   "%MAKE-SIMD-PACK-512-UB64"
+   "%MAKE-SIMD-PACK-512-DOUBLE"
+   "%MAKE-SIMD-PACK-512-SINGLE"
+   "%SIMD-PACK-512-UB8S"
+   "%SIMD-PACK-512-UB16S"
+   "%SIMD-PACK-512-UB32S"
+   "%SIMD-PACK-512-UB64S"
+   "%SIMD-PACK-512-SB8S"
+   "%SIMD-PACK-512-SB16S"
+   "%SIMD-PACK-512-SB32S"
+   "%SIMD-PACK-512-SB64S"
+   "%SIMD-PACK-512-DOUBLES"
+   "%SIMD-PACK-512-SINGLES"))
 
 (defpackage* "SB-DI"
   (:documentation "private: primitives used to write debuggers")
@@ -1888,6 +1919,7 @@ is a good idea, but see SB-SYS re. blurring of boundaries.")
            "%MAKE-RATIO"
            #+sb-simd-pack "%MAKE-SIMD-PACK"
            #+sb-simd-pack-256 "%MAKE-SIMD-PACK-256"
+           #+sb-simd-pack-512 "%MAKE-SIMD-PACK-512"
            "%MAKE-STRUCTURE-INSTANCE"
            "%MAKE-STRUCTURE-INSTANCE-ALLOCATOR"
            "%MAP" "%MAP-FOR-EFFECT-ARITY-1"
@@ -2207,6 +2239,8 @@ is a good idea, but see SB-SYS re. blurring of boundaries.")
            "OBJECT-NOT-SIMD-PACK-ERROR"
            #+sb-simd-pack-256
            "OBJECT-NOT-SIMD-PACK-256-ERROR"
+           #+sb-simd-pack-512
+           "OBJECT-NOT-SIMD-PACK-512-ERROR"
            "OBJECT-NOT-SIMPLE-ARRAY-COMPLEX-SINGLE-FLOAT-ERROR"
            "OBJECT-NOT-SIMPLE-ARRAY-DOUBLE-FLOAT-ERROR"
            "OBJECT-NOT-SIMPLE-ARRAY-ERROR"
@@ -2688,6 +2722,12 @@ is a good idea, but see SB-SYS re. blurring of boundaries.")
   (:export "%SIMD-PACK-256-TAG"
            "%SIMD-PACK-256-0" "%SIMD-PACK-256-1"
            "%SIMD-PACK-256-2" "%SIMD-PACK-256-3")
+  #+sb-simd-pack-512
+  (:export "%SIMD-PACK-512-TAG"
+           "%SIMD-PACK-512-0" "%SIMD-PACK-512-1"
+           "%SIMD-PACK-512-2" "%SIMD-PACK-512-3"
+           "%SIMD-PACK-512-4" "%SIMD-PACK-512-5"
+           "%SIMD-PACK-512-6" "%SIMD-PACK-512-7")
   #+sb-simd-pack
   (:export "SIMD-PACK-SINGLE"
            "SIMD-PACK-DOUBLE"
@@ -2701,6 +2741,12 @@ is a good idea, but see SB-SYS re. blurring of boundaries.")
            "SIMD-PACK-256-INT"
            "SIMD-PACK-256-TYPE"
            "SIMD-PACK-256-TYPE-ELEMENT-TYPE")
+  #+sb-simd-pack-512
+  (:export "SIMD-PACK-512-SINGLE"
+           "SIMD-PACK-512-DOUBLE"
+           "SIMD-PACK-512-INT"
+           "SIMD-PACK-512-TYPE"
+           "SIMD-PACK-512-TYPE-ELEMENT-TYPE")
   #+long-float
   (:export "LONG-FLOAT-EXPONENT" "LONG-FLOAT-EXP-BITS"
            "LONG-FLOAT-HIGH-BITS" "LONG-FLOAT-LOW-BITS"

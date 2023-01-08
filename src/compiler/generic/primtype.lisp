@@ -160,6 +160,39 @@
          simd-pack-256-sb16
          simd-pack-256-sb32
          simd-pack-256-sb64)))
+#+sb-simd-pack-512
+(progn
+  (!def-primitive-type simd-pack-512-single (single-avx512-reg descriptor-reg)
+    :type (simd-pack-512 single-float))
+  (!def-primitive-type simd-pack-512-double (double-avx512-reg descriptor-reg)
+    :type (simd-pack-512 double-float))
+  (!def-primitive-type simd-pack-512-ub8 (int-avx512-reg descriptor-reg)
+    :type (simd-pack-512 (unsigned-byte 8)))
+  (!def-primitive-type simd-pack-512-ub16 (int-avx512-reg descriptor-reg)
+    :type (simd-pack-512 (unsigned-byte 16)))
+  (!def-primitive-type simd-pack-512-ub32 (int-avx512-reg descriptor-reg)
+    :type (simd-pack-512 (unsigned-byte 32)))
+  (!def-primitive-type simd-pack-512-ub64 (int-avx512-reg descriptor-reg)
+    :type (simd-pack-512 (unsigned-byte 64)))
+  (!def-primitive-type simd-pack-512-sb8 (int-avx512-reg descriptor-reg)
+    :type (simd-pack-512 (signed-byte 8)))
+  (!def-primitive-type simd-pack-512-sb16 (int-avx512-reg descriptor-reg)
+    :type (simd-pack-512 (signed-byte 16)))
+  (!def-primitive-type simd-pack-512-sb32 (int-avx512-reg descriptor-reg)
+    :type (simd-pack-512 (signed-byte 32)))
+  (!def-primitive-type simd-pack-512-sb64 (int-avx512-reg descriptor-reg)
+    :type (simd-pack-512 (signed-byte 64)))
+  (!def-primitive-type-alias simd-pack-512
+   '(:or simd-pack-512-single
+         simd-pack-512-double
+         simd-pack-512-ub8
+         simd-pack-512-ub16
+         simd-pack-512-ub32
+         simd-pack-512-ub64
+         simd-pack-512-sb8
+         simd-pack-512-sb16
+         simd-pack-512-sb32
+         simd-pack-512-sb64)))
 
 ;;; primitive other-pointer array types
 (/show0 "primtype.lisp 96")
@@ -490,6 +523,35 @@
                   (exactly simd-pack-256-single))
                  ((eql position (position 'double-float *simd-pack-element-types* :test #'equal))
                   (exactly simd-pack-256-double))
+                 (t (any)))
+               (any))))
+        #+sb-simd-pack-512
+        (simd-pack-512-type
+         (let* ((eltypes (simd-pack-512-type-element-type type))
+                (count (count 1 eltypes))
+                (position (position 1 eltypes)))
+           (if (= count 1)
+               (cond
+                 ((eql position (position '(unsigned-byte 8) *simd-pack-element-types* :test #'equal))
+                  (exactly simd-pack-512-ub8))
+                 ((eql position (position '(unsigned-byte 16) *simd-pack-element-types* :test #'equal))
+                  (exactly simd-pack-512-ub16))
+                 ((eql position (position '(unsigned-byte 32) *simd-pack-element-types* :test #'equal))
+                  (exactly simd-pack-512-ub32))
+                 ((eql position (position '(unsigned-byte 64) *simd-pack-element-types* :test #'equal))
+                  (exactly simd-pack-512-ub64))
+                 ((eql position (position '(signed-byte 8) *simd-pack-element-types* :test #'equal))
+                  (exactly simd-pack-512-sb8))
+                 ((eql position (position '(signed-byte 16) *simd-pack-element-types* :test #'equal))
+                  (exactly simd-pack-512-sb16))
+                 ((eql position (position '(signed-byte 32) *simd-pack-element-types* :test #'equal))
+                  (exactly simd-pack-512-sb32))
+                 ((eql position (position '(signed-byte 64) *simd-pack-element-types* :test #'equal))
+                  (exactly simd-pack-512-sb64))
+                 ((eql position (position 'single-float *simd-pack-element-types* :test #'equal))
+                  (exactly simd-pack-512-single))
+                 ((eql position (position 'double-float *simd-pack-element-types* :test #'equal))
+                  (exactly simd-pack-512-double))
                  (t (any)))
                (any))))
         (cons-type

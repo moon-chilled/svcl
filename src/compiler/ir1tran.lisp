@@ -326,7 +326,8 @@
                             (or unboxed-array (array nil))
                             system-area-pointer
                             #+sb-simd-pack simd-pack
-                            #+sb-simd-pack-256 simd-pack-256))
+                            #+sb-simd-pack-256 simd-pack-256
+                            #+sb-simd-pack-512 simd-pack-512))
       (cl:typep obj 'debug-name-marker)
       ;; STANDARD-OBJECT layouts use MAKE-LOAD-FORM, but all other layouts
       ;; have the same status as symbols - composite objects but leaflike.

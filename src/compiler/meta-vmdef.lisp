@@ -1319,13 +1319,13 @@
            (type (or operand-parse null) more-op))
   (unless (eq types :unspecified)
     (let ((num (+ (length ops) (if more-op 1 0))))
-      (unless (= (count-if-not (lambda (x)
-                                 (and (consp x)
-                                      (eq (car x) :constant)))
-                               types)
-                 num)
-        (error "expected ~W ~:[result~;argument~] type~P: ~S"
-               num load-p types num)))
+      (let ((nargs (count-if-not (lambda (x)
+                                  (and (consp x)
+                                       (eq (car x) :constant)))
+                                types)))
+        (unless (= nargs num)
+          (error "expected ~W ~:[result~;argument~] type~P: ~S"
+                 num load-p types nargs))))
 
     (when more-op
       (let ((mtype (car (last types))))

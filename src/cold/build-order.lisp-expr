@@ -390,7 +390,7 @@
 
  ("src/compiler/target-dstate" :not-host)
  ("src/compiler/asm-target/insts")
- #+avx2 ("src/compiler/{arch}/avx2-insts")
+ #+avx2 ("src/compiler/{arch}/avx-insts")
  ("src/compiler/{arch}/macros")
 
  ("src/assembly/{arch}/support")
@@ -399,6 +399,7 @@
  ("src/compiler/{arch}/float")
  #+sb-simd-pack ("src/compiler/{arch}/simd-pack")
  #+sb-simd-pack-256 ("src/compiler/{arch}/simd-pack-256")
+ #+sb-simd-pack-512 ("src/compiler/{arch}/simd-pack-512")
  ("src/compiler/{arch}/sap")
  ("src/compiler/{arch}/system")
  ("src/compiler/{arch}/char")
@@ -572,7 +573,7 @@
  ;; target-only assemblerish stuff
  ("src/compiler/target-disassem"     :not-host)
  ("src/compiler/asm-target/target-insts" :not-host)
- #+avx2 ("src/compiler/{arch}/target-avx2-insts" :not-host)
+ #+avx2 ("src/compiler/{arch}/target-avx-insts" :not-host)
 
  ("src/code/debug" :not-host)
 

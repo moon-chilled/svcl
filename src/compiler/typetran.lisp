@@ -662,6 +662,20 @@
                     if (= bit 1)
                       collect `(eql ,n-tag ,i))))))))
 
+#+sb-simd-pack-512
+(defun source-transform-simd-pack-512-typep (object type)
+  (if (type= type (specifier-type 'simd-pack-512))
+      `(simd-pack-512-p ,object)
+      (let ((n-tag (gensym "TAG")))
+        `(and
+          (simd-pack-512-p ,object)
+          (let ((,n-tag (%simd-pack-512-tag ,object)))
+            (or ,@(loop
+                    for bit across (simd-pack-512-type-element-type type)
+                    for i from 0
+                    if (= bit 1)
+                      collect `(eql ,n-tag ,i))))))))
+
 ;;; Return the predicate and type from the most specific entry in
 ;;; *TYPE-PREDICATES* that is a supertype of TYPE.
 (defun find-supertype-predicate (type)
@@ -1070,6 +1084,9 @@
            #+sb-simd-pack-256
            (simd-pack-256-type
             (source-transform-simd-pack-256-typep object ctype))
+           #+sb-simd-pack-512
+           (simd-pack-512-type
+            (source-transform-simd-pack-512-typep object ctype))
            (t nil))
          `(%typep ,object ',type))
         (values nil t))))

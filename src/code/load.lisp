@@ -968,7 +968,18 @@
 (define-fop 88 :not-host (fop-simd-pack)
   (with-fast-read-byte ((unsigned-byte 8) (fasl-input-stream))
     (let ((tag (fast-read-s-integer 8)))
-      (cond #+sb-simd-pack-256
+      (cond #+sb-simd-pack-512
+            ((logbitp 7 tag)
+             (%make-simd-pack-512 (logand tag #b00111111)
+                                  (fast-read-u-integer 8)
+                                  (fast-read-u-integer 8)
+                                  (fast-read-u-integer 8)
+                                  (fast-read-u-integer 8)
+                                  (fast-read-u-integer 8)
+                                  (fast-read-u-integer 8)
+                                  (fast-read-u-integer 8)
+                                  (fast-read-u-integer 8)))
+            #+sb-simd-pack-256
             ((logbitp 6 tag)
              (%make-simd-pack-256 (logand tag #b00111111)
                                   (fast-read-u-integer 8)

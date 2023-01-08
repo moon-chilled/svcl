@@ -206,12 +206,14 @@
   weak-pointer-widetag                            ;  52   59
   fdefn-widetag                                   ;  56   5D
 
-  unused-widetag                                  ;  5A   61
-  #+sb-simd-pack simd-pack-widetag                ;       65
-  #-sb-simd-pack unused01-widetag                 ;  5E
-  #+sb-simd-pack-256 simd-pack-256-widetag        ;       69
-  #-sb-simd-pack-256 unused03-widetag             ;  62
+  #+sb-simd-pack simd-pack-widetag                ;       61
+  #-sb-simd-pack unused-widetag                   ;  5A
+  #+sb-simd-pack-256 simd-pack-256-widetag        ;       65
+  #-sb-simd-pack-256 unused01-widetag             ;  5E
+  #+sb-simd-pack-512 simd-pack-512-widetag        ;       69
+  #-sb-simd-pack-512 unused03-widetag             ;  62
   filler-widetag                                  ;  66   6D
+
   unused04-widetag                                ;  6A   71
   unused05-widetag                                ;  6E   75
   unused06-widetag                                ;  72   79
@@ -302,6 +304,7 @@
     (fdefn-widetag "fdefn")
     (simd-pack-widetag "SIMD-pack")
     (simd-pack-256-widetag "SIMD-pack256")
+    (simd-pack-512-widetag "SIMD-pack512")
     (filler-widetag "filler")
     (simple-array-widetag "simple-array")
     (simple-array-nil-widetag "simple-array-NIL")

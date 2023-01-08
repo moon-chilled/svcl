@@ -107,6 +107,11 @@
      (and (simd-pack-256-p object)
           (let* ((tag (%simd-pack-256-tag object)))
             (= (sbit (simd-pack-256-type-element-type type) tag) 1))))
+    #+sb-simd-pack-512
+    (simd-pack-512-type
+     (and (simd-pack-512-p object)
+          (let* ((tag (%simd-pack-512-tag object)))
+            (= (sbit (simd-pack-512-type-element-type type) tag) 1))))
     (character-set-type
      (test-character-type type))
     (negation-type
@@ -283,7 +288,8 @@
          member-type
          character-set-type
          #+sb-simd-pack simd-pack-type
-         #+sb-simd-pack-256 simd-pack-256-type)
+         #+sb-simd-pack-256 simd-pack-256-type
+         #+sb-simd-pack-512 simd-pack-512-type)
      (values (%%typep obj type)
              t))
     (array-type

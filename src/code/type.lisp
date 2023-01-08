@@ -5224,6 +5224,25 @@ used for a COMPLEX component.~:@>"
                                  :element-type 'bit :initial-element 0)))
              (setf (sbit bv i) 1)
              (return bv)))))))
+#+sb-simd-pack-512
+(defun make-simd-pack-512-type (element-type)
+  (aver (neq element-type *wild-type*))
+  (if (eq element-type *empty-type*)
+      *empty-type*
+      (%make-simd-pack-512-type
+       (do* ((i 0 (1+ i))
+             (pack-types *simd-pack-element-types* (cdr pack-types))
+             (pack-type (car pack-types) (car pack-types)))
+            ((null pack-types)
+             (error "~S element type must be a subtype of ~
+                         ~{~/sb-impl:print-type-specifier/~#[~;, or ~
+                         ~:;, ~]~}."
+                    'simd-pack-512 *simd-pack-element-types*))
+         (when (csubtypep element-type (specifier-type pack-type))
+           (let ((bv (make-array (length *simd-pack-element-types*)
+                                 :element-type 'bit :initial-element 0)))
+             (setf (sbit bv i) 1)
+             (return bv)))))))
 
 #+sb-simd-pack
 (progn
@@ -5354,6 +5373,71 @@ used for a COMPLEX component.~:@>"
           *empty-type*)))
 
   (!define-superclasses simd-pack-256 ((simd-pack-256)) !cold-init-forms))
+
+#+sb-simd-pack-512
+(progn
+  (define-type-class simd-pack-512 :enumerable nil :might-contain-other-types nil)
+
+  ;; Though this involves a recursive call to parser, parsing context need not
+  ;; be passed down, because an unknown-type condition is an immediate failure.
+  (def-type-translator simd-pack-512 (&optional (element-type-spec '*))
+    (if (eql element-type-spec '*)
+        (%make-simd-pack-512-type (make-array (length *simd-pack-element-types*)
+                                              :element-type 'bit :initial-element 1))
+        (make-simd-pack-512-type (single-value-specifier-type element-type-spec))))
+
+  (define-type-method (simd-pack-512 :negate) (type)
+    (let* ((element-type (simd-pack-512-type-element-type type))
+           (remaining (and (/= (count 0 element-type) 0) (bit-not element-type)))
+           (not-simd-pack-512 (make-negation-type (specifier-type 'simd-pack-512))))
+      (if remaining
+          (type-union not-simd-pack-512 (%make-simd-pack-512-type remaining))
+          not-simd-pack-512)))
+
+  (define-type-method (simd-pack-512 :unparse) (type)
+    (let* ((eltypes (simd-pack-512-type-element-type type)))
+      (cond
+        ((= (count 0 eltypes) 0) 'simd-pack-512)
+        ((= (count 1 eltypes) 1)
+         (let ((pos (position 1 eltypes)))
+           (if pos
+               `(simd-pack-512 ,(elt *simd-pack-element-types* pos))
+               (bug "bad simd-pack-512"))))
+        (t
+         `(or
+           ,@(loop for x from 0
+                   for bit across eltypes
+                   if (= bit 1)
+                   collect `(simd-pack-512 ,(elt *simd-pack-element-types* x))))))))
+
+  (define-type-method (simd-pack-512 :simple-=) (type1 type2)
+    (declare (type simd-pack-512-type type1 type2))
+    (values
+     (= 0 (count 1 (bit-xor (simd-pack-512-type-element-type type1)
+                            (simd-pack-512-type-element-type type2))))
+     t))
+
+  (define-type-method (simd-pack-512 :simple-subtypep) (type1 type2)
+    (declare (type simd-pack-512-type type1 type2))
+    (values
+     (= 0 (count 1 (bit-andc2 (simd-pack-512-type-element-type type1)
+                              (simd-pack-512-type-element-type type2))))
+     t))
+
+  (define-type-method (simd-pack-512 :simple-union2) (type1 type2)
+    (declare (type simd-pack-512-type type1 type2))
+    (%make-simd-pack-512-type (bit-ior (simd-pack-512-type-element-type type1)
+                                       (simd-pack-512-type-element-type type2))))
+
+  (define-type-method (simd-pack-512 :simple-intersection2) (type1 type2)
+    (declare (type simd-pack-512-type type1 type2))
+    (let ((intersection (bit-and (simd-pack-512-type-element-type type1)
+                                 (simd-pack-512-type-element-type type2))))
+      (if (find 1 intersection)
+          (%make-simd-pack-512-type intersection)
+          *empty-type*)))
+
+  (!define-superclasses simd-pack-512 ((simd-pack-512)) !cold-init-forms))
 
 ;;;; utilities shared between cross-compiler and target system
 
@@ -5720,6 +5804,18 @@ used for a COMPLEX component.~:@>"
          (svref (load-time-value
                  (coerce (cons (specifier-type 'simd-pack-256)
                                (mapcar (lambda (x) (specifier-type `(simd-pack-256 ,x)))
+                                       *simd-pack-element-types*))
+                         'vector)
+                 t)
+                (if (<= 0 tag #.(1- (length *simd-pack-element-types*)))
+                    (1+ tag)
+                    0))))
+      #+sb-simd-pack-512
+      (simd-pack-512
+       (let ((tag (%simd-pack-512-tag x)))
+         (svref (load-time-value
+                 (coerce (cons (specifier-type 'simd-pack-512)
+                               (mapcar (lambda (x) (specifier-type `(simd-pack-512 ,x)))
                                        *simd-pack-element-types*))
                          'vector)
                  t)

@@ -22,10 +22,12 @@
   ;; Imports from SB-VM into this package
   #+sb-simd-pack-256
   (import '(sb-vm::int-avx2-reg sb-vm::double-avx2-reg sb-vm::single-avx2-reg))
+  #+sb-simd-pack-512
+  (import '(sb-vm::int-avx512-reg sb-vm::double-avx512-reg sb-vm::single-avx512-reg))
   (import '(sb-vm::tn-byte-offset sb-vm::tn-reg sb-vm::reg-name
             sb-vm::frame-byte-offset sb-vm::rip-tn sb-vm::rbp-tn
             sb-vm::gpr-tn-p sb-vm::stack-tn-p sb-c::tn-reads sb-c::tn-writes
-            sb-vm::ymm-reg
+            sb-vm::ymm-reg sb-vm::zmm-reg
             sb-vm::registers sb-vm::float-registers sb-vm::stack))) ; SB names
 
 (defconstant +lock-prefix-present+ #x80)
@@ -117,7 +119,8 @@
     (:dword 4)
     (:qword 8)
     (:oword 16)
-    (:hword 32)))
+    (:hword 32)
+    (:zword 64)))
 
 ;;; If chopping IMM to 32 bits and sign-extending is equal to the original value,
 ;;; return the signed result, which the CPU will always extend to 64 bits.
@@ -996,12 +999,17 @@
                1)))
 
 (defun make-fpr-id (index size)
-  (declare (type (mod 16) index))
+  (declare (type (mod 32) index))
   (ecase size
-    (:xmm (logior (ash index 3) 1)) ; low bit = FPR, not GPR
-    (:ymm (logior (ash index 3) 3))))
+    (:xmm (logior (ash index 3) #b001)) ; low bit = FPR, not GPR
+    (:ymm (logior (ash index 3) #b011))
+    (:zmm (logior (ash index 3) #b101))))
 (defun is-ymm-id-p (reg-id)
-  (= (ldb (byte 3 0) reg-id) 3))
+  (= (ldb (byte 3 0) reg-id) #b011))
+(defun is-zmm-id-p (reg-id)
+  (= (ldb (byte 3 0) reg-id) #b101))
+(defun xmm-register-byte-size (reg-id)
+  (ash 1 (+ 4 (ldb (byte 2 1) reg-id))))
 
 (declaim (inline is-gpr-id-p gpr-id-size-class reg-id-num))
 (defun is-gpr-id-p (reg-id)
@@ -1040,11 +1048,14 @@
                                   sb-vm::+byte-register-names+)
                           t)
                          (gpr-id-size-class id)))
+                 ((is-zmm-id-p id)
+                  #.(coerce (loop for i below 32 collect (format nil "ZMM~D" i))
+                            'vector))
                  ((is-ymm-id-p id)
-                  #.(coerce (loop for i below 16 collect (format nil "YMM~D" i))
+                  #.(coerce (loop for i below 32 collect (format nil "YMM~D" i))
                             'vector))
                  (t
-                  #.(coerce (loop for i below 16 collect (format nil "XMM~D" i))
+                  #.(coerce (loop for i below 32 collect (format nil "XMM~D" i))
                             'vector)))
            (reg-id-num id))))
 
@@ -1090,15 +1101,22 @@
   (ecase regset
     (:xmm
      (svref (load-time-value
-             (coerce (loop for i from 0 below 16
+             (coerce (loop for i from 0 below 32
                         collect (!make-reg (make-fpr-id i :xmm)))
                      'vector)
              t)
             number))
     (:ymm
      (svref (load-time-value
-             (coerce (loop for i from 0 below 16
+             (coerce (loop for i from 0 below 32
                         collect (!make-reg (make-fpr-id i :ymm)))
+                     'vector)
+             t)
+            number))
+    (:zmm
+     (svref (load-time-value
+             (coerce (loop for i from 0 below 32
+                           collect (!make-reg (make-fpr-id i :zmm)))
                      'vector)
              t)
             number))))
@@ -1127,6 +1145,12 @@
                   ((eq (sb-name (sc-sb (tn-sc operand))) 'registers)
                    (tn-reg operand))
                   ((memq (sc-name (tn-sc operand))
+                         '(zmm-reg
+                           int-avx512-reg
+                           double-avx512-reg
+                           single-avx512-reg))
+                   (get-fpr :zmm (tn-offset operand)))
+                  ((memq (sc-name (tn-sc operand))
                          '(ymm-reg
                            int-avx2-reg
                            double-avx2-reg
@@ -1138,7 +1162,7 @@
                    operand)))
           operands))
 
-(defun emit-ea (segment thing reg &key (remaining-bytes 0) xmm-index)
+(defun emit-ea (segment thing reg &key (remaining-bytes 0) xmm-index force-dword-disp)
   (when (register-p reg)
     (setq reg (reg-encoding reg segment)))
   (etypecase thing
@@ -1182,7 +1206,7 @@
             (base-encoding (when base (reg-encoding (tn-reg base) segment)))
             (mod (cond ((or (null base) (and (eql disp 0) (/= base-encoding #b101)))
                         #b00)
-                       ((and (fixnump disp) (<= -128 disp 127))
+                       ((and (fixnump disp) (<= -128 disp 127) (not force-dword-disp))
                         #b01)
                        (t
                         #b10)))
@@ -3238,7 +3262,11 @@
       #+(and sb-simd-pack-256 (not sb-xc-host))
       (simd-pack-256
        (setq constant
-             (sb-vm::%simd-pack-256-inline-constant first)))))
+             (sb-vm::%simd-pack-256-inline-constant first)))
+      #+(and sb-simd-pack-512 (not sb-xc-host))
+      (simd-pack-512
+       (setq constant
+             (sb-vm::%simd-pack-512-inline-constant first)))))
   (destructuring-bind (type value) constant
     (ecase type
       ((:byte :word :dword :qword)
@@ -3250,6 +3278,9 @@
       ((:hword :avx2)
        (aver (integerp value))
        (cons :hword value))
+      ((:zword :avx512)
+       (aver (integerp value))
+       (cons :zword value))
       ((:single-float)
        (aver (typep value 'single-float))
        (cons (if alignedp :oword :dword)
