@@ -70,6 +70,14 @@
   ;; size is arbitrary here since the printer determines it
   (get-gpr :qword (if (dstate-getprop dstate +rex-r+) (+ value 8) value)))
 
+;;; Ditto, but also includes EVEX.R'
+(defun prefilter-reg-r- (dstate value)
+  (declare (type (mod 8) value) (type disassem-state dstate))
+  ;; size is arbitrary here since the printer determines it
+  (get-fpr :xmm (+ value
+                   (if (dstate-getprop dstate +rex-r+) 8 0)
+                   (if (dstate-getprop dstate +evex-r-+) 16 0))))
+
 ;;; A register field that can be extended by REX.B.
 (defun prefilter-reg-b (dstate value)
   (declare (type (mod 8) value) (type disassem-state dstate))

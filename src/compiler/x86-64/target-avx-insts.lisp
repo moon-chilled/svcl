@@ -13,9 +13,13 @@
 
 (defun print-ymmreg (value stream dstate)
   (let* ((offset (etypecase value
-                  ((unsigned-byte 4) value)
+                  ((unsigned-byte 5) value)
                   (reg (reg-num value))))
-         (reg (get-fpr (if (dstate-getprop dstate +vex-l+) :ymm :xmm) offset))
+         (reg (get-fpr (cond
+                         ((dstate-getprop dstate +vex-l512+) :zmm)
+                         ((dstate-getprop dstate +vex-l256+) :ymm)
+                         (t :xmm))
+                       offset))
          (name (reg-name reg)))
     (if stream
         (write-string name stream)

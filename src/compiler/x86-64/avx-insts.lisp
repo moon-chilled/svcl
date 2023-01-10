@@ -1,7 +1,25 @@
 (in-package "SB-X86-64-ASM")
 
+(defconstant +vex-l256+ #b00010000000000)
+(defconstant +vex-l512+ #b00100000000000)
+(defconstant +evex-v-+  #b01000000000000)
+(defconstant +evex-r-+  #b10000000000000)
+
+;; todo: should still print mask for instructions like compress (are there others?
+(define-arg-type evex-aaa
+  :printer (lambda (value stream dstate)
+             (declare (ignore dstate))
+             (unless (zerop value)
+               (format stream "{k~a}" value))))
+
+(define-arg-type evex-z
+  :printer (lambda (value stream dstate)
+             (declare (ignore dstate))
+             (unless (zerop value)
+               (format stream "{z}"))))
+
 (define-arg-type ymmreg
-  :prefilter #'prefilter-reg-r
+  :prefilter #'prefilter-reg-r-
   :printer #'print-ymmreg)
 
 (define-arg-type ymmreg-b
@@ -10,7 +28,8 @@
 
 (define-arg-type ymm-vvvv-reg
   :prefilter #'invert-4
-  :printer #'print-ymmreg)
+  :printer (lambda (value dstream dstate)
+             (print-ymmreg (if (dstate-getprop dstate +evex-v-+) (+ value 16) value) dstream dstate)))
 
 (define-arg-type ymm-reg-is4
   :printer #'print-ymmreg)
@@ -39,26 +58,38 @@
   :prefilter #'prefilter-xmmreg/mem
   :printer #'print-sized-xmmreg/mem-default-qword)
 
-(defconstant +vex-l+ #b10000000000)
+(define-arg-type vex-ll
+  :prefilter (lambda (dstate value)
+               (cond
+                 ((= value #b01) (dstate-setprop dstate +vex-l256+))
+                 ((= value #b10) (dstate-setprop dstate +vex-l512+)))))
 
-(define-arg-type vex-l
-  :prefilter  (lambda (dstate value)
-                (dstate-setprop dstate (if (plusp value) +vex-l+ 0))))
+;; stored inverted
+(define-arg-type evex-v-
+  :prefilter (lambda (dstate value)
+               (when (zerop value)
+                 (dstate-setprop dstate +evex-v-+))))
+
+;; stored inverted
+(define-arg-type evex-r-
+  :prefilter (lambda (dstate value)
+               (when (zerop value)
+                 (dstate-setprop dstate +evex-r-+))))
 
 (define-arg-type vex-w
-  :prefilter  (lambda (dstate value)
+  :prefilter (lambda (dstate value)
                 (dstate-setprop dstate (if (plusp value) +rex-w+ 0))))
 
 (define-arg-type vex-r
-  :prefilter  (lambda (dstate value)
+  :prefilter (lambda (dstate value)
                 (dstate-setprop dstate (if (plusp value) 0 +rex-r+))))
 
 (define-arg-type vex-x
-  :prefilter  (lambda (dstate value)
+  :prefilter (lambda (dstate value)
                 (dstate-setprop dstate (if (plusp value) 0 +rex-x+))))
 
 (define-arg-type vex-b
-  :prefilter  (lambda (dstate value)
+  :prefilter (lambda (dstate value)
                 (dstate-setprop dstate (if (plusp value) 0 +rex-b+))))
 
 (defconstant-eqx +avx-conditions+
@@ -77,7 +108,7 @@
                            (vex :field (byte 8 0) :value #xC5)
                            (r :field (byte 1 (+ 8 7)) :type 'vex-r)
                            (vvvv :field (byte 4 (+ 8 3)) :type 'ymm-vvvv-reg)
-                           (l  :field (byte 1 (+ 8 2)) :type 'vex-l)
+                           (l  :field (byte 1 (+ 8 2)) :type 'vex-ll)
                            (pp :field (byte 2 (+ 8 0))))
 
 (define-instruction-format (vex3 24)
@@ -88,8 +119,26 @@
                            (m-mmmm :field (byte 5 (+ 8 0)))
                            (w :field (byte 1 (+ 16 7)) :type 'vex-w)
                            (vvvv :field (byte 4 (+ 16 3)) :type 'ymm-vvvv-reg)
-                           (l  :field (byte 1 (+ 16 2)) :type 'vex-l)
+                           (l  :field (byte 1 (+ 16 2)) :type 'vex-ll)
                            (pp :field (byte 2 (+ 16 0))))
+
+(define-instruction-format (evex 32)
+                           (evex     :field (byte 8 0) :value #x62)
+                           (r        :field (byte 1 (+ 8 7)) :type 'vex-r)
+                           (x        :field (byte 1 (+ 8 6)) :type 'vex-x)
+                           (b        :field (byte 1 (+ 8 5)) :type 'vex-b)
+                           (r-       :field (byte 1 (+ 8 4)) :type 'evex-r-)
+                           (reserved :field (byte 2 (+ 8 2)) :value 0)
+                           (mm       :field (byte 2 (+ 8 0)))
+                           (w        :field (byte 1 (+ 16 7)) :type 'vex-w)
+                           (vvvv     :field (byte 4 (+ 16 3)) :type 'ymm-vvvv-reg)
+                           (reserv2  :field (byte 1 (+ 16 2)) :value 1)
+                           (pp       :field (byte 2 (+ 16 0)))
+                           (z        :field (byte 1 (+ 24 7)) :type 'evex-z)
+                           (ll       :field (byte 2 (+ 24 5)) :type 'vex-ll)
+                           (bb       :field (byte 1 (+ 24 4)) #|:type 'evex-bb|#) ;todo
+                           (v-       :field (byte 1 (+ 24 3)) :type 'evex-v-)
+                           (aaa      :field (byte 3 (+ 24 0)) :type 'evex-aaa))
 
 (define-instruction-format (vex2-op 24
                             :include vex2
@@ -112,7 +161,13 @@
                                               (symbolicate "VEX3-" include)
                                               'vex3)
                                 :default-printer ,default-printer)
-                               ,@(subst 24 'start arg-specs))))
+                               ,@(subst 24 'start arg-specs))
+    (define-instruction-format (,(symbolicate "EVEX-" format-name) (+ 32 ,length-in-bits)
+                                :include ,(if include
+                                              (symbolicate "EVEX-" include)
+                                              'evex)
+                                :default-printer ,default-printer)
+                               ,@(subst 32 'start arg-specs))))
 
 (define-vex-instruction-format (ymm-ymm/mem 16
                                 :default-printer
@@ -404,7 +459,8 @@
                  (ea-index thing)
                  (not (gpr-p (ea-index thing)))
                  (logbitp 5 (tn-offset (ea-index thing)))))
-        (emit-avx512-inst segment thing reg prefix opcode :displacement-multiplier displacement-multiplier :remaining-bytes remaining-bytes :ll ll :opcode-prefix opcode-prefix :w w :vvvvv vvvvv))))
+        (emit-avx512-inst segment thing reg prefix opcode :displacement-multiplier displacement-multiplier :remaining-bytes remaining-bytes :ll ll :opcode-prefix opcode-prefix :w w :vvvvv vvvvv)
+        (emit-avx2-inst segment thing reg prefix opcode :remaining-bytes remaining-bytes :l ll :opcode-prefix opcode-prefix :w w :vvvv vvvvv))))
 
 (defun emit-avx2-inst-imm (segment thing reg imm prefix opcode /i
                            &key l
@@ -460,7 +516,55 @@
                                     `('(:name :tab reg/mem ", " vvvv ", " reg)))
                                    (nds
                                     `('(:name :tab reg ", " vvvv ", " reg/mem))))))
-              inst-formats))))
+              inst-formats)))
+  (defun avx512-inst-printer-list (inst-format-stem prefix opcode
+                                   &key more-fields printer
+                                        (opcode-prefix #x0F)
+                                        reg-mem-size
+                                        xmmreg-mem-size
+                                        w
+                                        ll
+                                        nds)
+    (let ((fields `((pp ,(vex-encode-pp prefix))
+                    (mm ,(vex-encode-m-mmmm opcode-prefix))
+                    (op ,opcode)
+                    ,@(and w `((w ,w)))
+                    ,@(and ll `((ll ,ll)))
+                    ,@(cond (xmmreg-mem-size
+                             `((reg/mem nil :type ',(case xmmreg-mem-size
+                                                      (:qword 'sized-xmmreg/mem-default-qword)
+                                                      (:dword 'sized-dword-xmmreg/mem)
+                                                      (:word 'sized-word-xmmreg/mem)
+                                                      (:byte 'sized-byte-xmmreg/mem)
+                                                      (:sized 'sized-xmmreg/mem)))))
+                            (reg-mem-size
+                             `((reg/mem nil :type ',(case reg-mem-size
+                                                      (:qword 'sized-reg/mem-default-qword)
+                                                      (:dword 'sized-dword-reg/mem)
+                                                      (:word 'sized-word-reg/mem)
+                                                      (:byte 'sized-byte-reg/mem)
+                                                      (:sized 'sized-reg/mem))))))
+                    ,@more-fields))
+          (inst-formats (list (symbolicate "EVEX-" inst-format-stem))))
+      (mapcar (lambda (inst-format)
+                `(:printer ,inst-format ,fields
+                           ,@(cond (printer
+                                    `(',printer))
+                                   ((eq nds 'to-mem)
+                                    `('(:name :tab reg/mem aaa z ", " vvvv ", " reg)))
+                                   (nds
+                                    `('(:name :tab reg aaa z ", " vvvv ", " reg/mem))))))
+              inst-formats)))
+  (defun avx*-inst-printer-list (inst-format-stem prefix opcode
+                                 &key more-fields ;printer
+                                      (opcode-prefix #x0F)
+                                       reg-mem-size
+                                       xmmreg-mem-size
+                                       w
+                                       ll
+                                       nds)
+    `(,@(avx2-inst-printer-list   inst-format-stem prefix opcode :more-fields more-fields :opcode-prefix opcode-prefix :reg-mem-size reg-mem-size :xmmreg-mem-size xmmreg-mem-size :w w :l  ll :nds nds)
+      ,@(avx512-inst-printer-list inst-format-stem prefix opcode :more-fields more-fields :opcode-prefix opcode-prefix :reg-mem-size reg-mem-size :xmmreg-mem-size xmmreg-mem-size :w w :ll ll :nds nds))))
 
 (macrolet
     ((def (name opcode /i)
@@ -483,88 +587,79 @@
   (def vpsrld-imm #x72 2)
   (def vpsrlq-imm #x73 2))
 
-(macrolet ((def (name prefix opcode &optional (opcode-prefix #x0F))
+;; Most of these are WIG for avx/avx2, but require a specific w value for avx512; just use the same thing for plain avx, for simplicity.  TODO bad for codesize, as needless W1 forces vex3 when vex2 would work just fine.
+(macrolet ((def (name prefix opcode &optional w (opcode-prefix #x0F))
              `(define-instruction ,name (segment dst src src2)
-                ,@(avx2-inst-printer-list 'ymm-ymm/mem prefix opcode :nds t
+                ,@(avx*-inst-printer-list 'ymm-ymm/mem prefix opcode :nds t :w (or w 0)
                                           :opcode-prefix opcode-prefix)
                 (:emitter
-                 (emit-avx2-inst segment src2 dst ,prefix ,opcode
+                 (emit-avx*-inst segment src2 dst ,prefix ,opcode
                                  :opcode-prefix ,opcode-prefix
-                                 :vvvv src)))))
+                                 :vvvvv src :w ,(or w 0)))))) ; ...
   ;; logical
-  (def vandpd    #x66 #x54)
-  (def vandps    nil  #x54)
-  (def vandnpd   #x66 #x55)
-  (def vandnps   nil  #x55)
-  (def vorpd     #x66 #x56)
-  (def vorps     nil  #x56)
-  (def vpand     #x66 #xdb)
-  (def vpandn    #x66 #xdf)
-  (def vpor      #x66 #xeb)
-  (def vpxor     #x66 #xef)
-  (def vxorpd    #x66 #x57)
-  (def vxorps    nil  #x57)
+  (def vandpd    #x66 #x54 1)
+  (def vandps    nil  #x54 0)
+  (def vandnpd   #x66 #x55 1)
+  (def vandnps   nil  #x55 0)
+  (def vorpd     #x66 #x56 1)
+  (def vorps     nil  #x56 0)
+  (def vxorpd    #x66 #x57 1)
+  (def vxorps    nil  #x57 0)
   ;; comparison
-  (def vcomisd   #x66 #x2f)
-  (def vcomiss   nil  #x2f)
-  (def vucomisd  #x66 #x2e)
-  (def vucomiss  nil  #x2e)
-  ;; integer comparison
-  (def vpcmpeqb  #x66 #x74)
-  (def vpcmpeqw  #x66 #x75)
-  (def vpcmpeqd  #x66 #x76)
-  (def vpcmpgtb  #x66 #x64)
-  (def vpcmpgtw  #x66 #x65)
-  (def vpcmpgtd  #x66 #x66)
+  (def vcomisd   #x66 #x2f 1)
+  (def vcomiss   nil  #x2f 0)
+  (def vucomisd  #x66 #x2e 1)
+  (def vucomiss  nil  #x2e 0)
   ;; max/min
-  (def vmaxpd    #x66 #x5f)
-  (def vmaxps    nil  #x5f)
-  (def vmaxsd    #xf2 #x5f)
-  (def vmaxss    #xf3 #x5f)
-  (def vminpd    #x66 #x5d)
-  (def vminps    nil  #x5d)
-  (def vminsd    #xf2 #x5d)
-  (def vminss    #xf3 #x5d)
+  (def vmaxpd    #x66 #x5f 1)
+  (def vmaxps    nil  #x5f 0)
+  (def vmaxsd    #xf2 #x5f 1)
+  (def vmaxss    #xf3 #x5f 0)
+  (def vminpd    #x66 #x5d 1)
+  (def vminps    nil  #x5d 0)
+  (def vminsd    #xf2 #x5d 1)
+  (def vminss    #xf3 #x5d 0)
   ;; integer max/min
   (def vpmaxsw   #x66 #xee)
   (def vpmaxub   #x66 #xde)
   (def vpminsw   #x66 #xea)
   (def vpminub   #x66 #xda)
   ;; arithmetic
-  (def vaddpd    #x66 #x58)
-  (def vaddps    nil  #x58)
-  (def vaddsd    #xf2 #x58)
-  (def vaddss    #xf3 #x58)
-  (def vaddsubpd #x66 #xd0)
-  (def vaddsubps #xf2 #xd0)
-  (def vdivpd    #x66 #x5e)
-  (def vdivps    nil  #x5e)
-  (def vdivsd    #xf2 #x5e)
-  (def vdivss    #xf3 #x5e)
-  (def vhaddpd   #x66 #x7c)
-  (def vhaddps   #xf2 #x7c)
-  (def vhsubpd   #x66 #x7d)
-  (def vhsubps   #xf2 #x7d)
-  (def vmulpd    #x66 #x59)
-  (def vmulps    nil  #x59)
-  (def vmulsd    #xf2 #x59)
-  (def vmulss    #xf3 #x59)
+  (def vaddpd    #x66 #x58 1)
+  (def vaddps    nil  #x58 0)
+  (def vaddsd    #xf2 #x58 1)
+  (def vaddss    #xf3 #x58 0)
+  (def vaddsubpd #x66 #xd0 1)
+  (def vaddsubps #xf2 #xd0 0)
+  (def vdivpd    #x66 #x5e 1)
+  (def vdivps    nil  #x5e 0)
+  (def vdivsd    #xf2 #x5e 1)
+  (def vdivss    #xf3 #x5e 0)
+  (def vhaddpd   #x66 #x7c 1)
+  (def vhaddps   #xf2 #x7c 0)
+  (def vhsubpd   #x66 #x7d 1)
+  (def vhsubps   #xf2 #x7d 0)
+  (def vmulpd    #x66 #x59 1)
+  (def vmulps    nil  #x59 0)
+  (def vmulsd    #xf2 #x59 1)
+  (def vmulss    #xf3 #x59 0)
 
-  (def vsubpd    #x66 #x5c)
-  (def vsubps    nil  #x5c)
-  (def vsubsd    #xf2 #x5c)
-  (def vsubss    #xf3 #x5c)
-  (def vunpckhpd #x66 #x15)
-  (def vunpckhps nil  #x15)
-  (def vunpcklpd #x66 #x14)
-  (def vunpcklps nil  #x14)
+  (def vsubpd    #x66 #x5c 1)
+  (def vsubps    nil  #x5c 0)
+  (def vsubsd    #xf2 #x5c 1)
+  (def vsubss    #xf3 #x5c 0)
+  (def vunpckhpd #x66 #x15 1)
+  (def vunpckhps nil  #x15 0)
+  (def vunpcklpd #x66 #x14 1)
+  (def vunpcklps nil  #x14 0)
   ;; integer arithmetic
   (def vpaddb    #x66 #xfc)
   (def vpaddw    #x66 #xfd)
-  (def vpaddd    #x66 #xfe)
-  (def vpaddq    #x66 #xd4)
+  (def vpaddd    #x66 #xfe 0)
+  (def vpaddq    #x66 #xd4 1)
   (def vpaddsb   #x66 #xec)
   (def vpaddsw   #x66 #xed)
+
   (def vpaddusb  #x66 #xdc)
   (def vpaddusw  #x66 #xdd)
   (def vpavgb    #x66 #xe0)
@@ -573,72 +668,122 @@
   (def vpmulhuw  #x66 #xe4)
   (def vpmulhw   #x66 #xe5)
   (def vpmullw   #x66 #xd5)
-  (def vpmuludq  #x66 #xf4)
+  (def vpmuludq  #x66 #xf4 1)
   (def vpsadbw   #x66 #xf6)
   (def vpsllw    #x66 #xf1)
-  (def vpslld    #x66 #xf2)
-  (def vpsllq    #x66 #xf3)
+  (def vpslld    #x66 #xf2 0)
+  (def vpsllq    #x66 #xf3 1)
   (def vpsraw    #x66 #xe1)
   (def vpsrad    #x66 #xe2)
   (def vpsrlw    #x66 #xd1)
-  (def vpsrld    #x66 #xd2)
-  (def vpsrlq    #x66 #xd3)
+  (def vpsrld    #x66 #xd2 0)
+  (def vpsrlq    #x66 #xd3 1)
   (def vpsubb    #x66 #xf8)
   (def vpsubw    #x66 #xf9)
-  (def vpsubd    #x66 #xfa)
-  (def vpsubq    #x66 #xfb)
+  (def vpsubd    #x66 #xfa 0)
+  (def vpsubq    #x66 #xfb 1)
   (def vpsubsb   #x66 #xe8)
   (def vpsubsw   #x66 #xe9)
   (def vpsubusb  #x66 #xd8)
   (def vpsubusw  #x66 #xd9)
 
   ;; integer
-  (def vpacksswb  #x66 #x63)
-  (def vpackssdw  #x66 #x6b)
-  (def vpackuswb  #x66 #x67)
-  (def vpunpckhbw #x66 #x68)
-  (def vpunpckhwd #x66 #x69)
-  (def vpunpckhdq #x66 #x6a)
-  (def vpunpckhqdq #x66 #x6d)
-  (def vpunpcklbw #x66 #x60)
-  (def vpunpcklwd #x66 #x61)
-  (def vpunpckldq #x66 #x62)
-  (def vpunpcklqdq #x66 #x6c)
+  (def vpacksswb   #x66 #x63)
+  (def vpackssdw   #x66 #x6b 0)
+  (def vpackuswb   #x66 #x67)
+  (def vpunpckhbw  #x66 #x68)
+  (def vpunpckhwd  #x66 #x69)
+  (def vpunpckhdq  #x66 #x6a 0)
+  (def vpunpckhqdq #x66 #x6d 1)
+  (def vpunpcklbw  #x66 #x60)
+  (def vpunpcklwd  #x66 #x61)
+  (def vpunpckldq  #x66 #x62 0)
+  (def vpunpcklqdq #x66 #x6c 1)
 
-  (def vpshufb #x66 #x00 #x0f38)
+  ;; these are all really wig
+  (def vpshufb #x66 #x00 nil #x0f38)
+  (def vpmaddubsw #x66 #x04 nil #x0f38)
+  (def vpmulhrsw #x66 #x0b nil #x0f38)
+
+
+  (def vpmuldq #x66 #x28 1 #x0f38)
+  (def vpackusdw #x66 #x2b 0 #x0f38)
+
+  (def vpminsb #x66 #x38 nil #x0f38)
+  (def vpminsd #x66 #x39 0   #x0f38)
+  (def vpminuw #x66 #x3a nil #x0f38)
+  (def vpminud #x66 #x3b 0   #x0f38)
+  (def vpmaxsb #x66 #x3c nil #x0f38)
+  (def vpmaxsd #x66 #x3d 0   #x0f38)
+  (def vpmaxuw #x66 #x3e nil #x0f38)
+  (def vpmaxud #x66 #x3f 0   #x0f38)
+
+  (def vpmulld #x66 #x40 0 #x0f38)
+
+  (def vaesenc     #x66 #xdc nil #x0f38)
+  (def vaesenclast #x66 #xdd nil #x0f38)
+  (def vaesdec     #x66 #xde nil #x0f38)
+  (def vaesdeclast #x66 #xdf nil #x0f38))
+
+;; avx2 exclusives
+(macrolet ((def (name prefix opcode &optional (opcode-prefix #x0F))
+             `(define-instruction ,name (segment dst src src2)
+                ,@(avx2-inst-printer-list 'ymm-ymm/mem prefix opcode :nds t
+                                          :opcode-prefix opcode-prefix)
+                (:emitter
+                 (emit-avx2-inst segment src2 dst ,prefix ,opcode
+                                 :opcode-prefix ,opcode-prefix
+                                 :vvvv src)))))
   (def vphaddw #x66 #x01 #x0f38)
   (def vphaddd #x66 #x02 #x0f38)
   (def vphaddsw #x66 #x03 #x0f38)
-  (def vpmaddubsw #x66 #x04 #x0f38)
   (def vphsubw #x66 #x05 #x0f38)
   (def vphsubd #x66 #x06 #x0f38)
   (def vphsubsw #x66 #x07 #x0f38)
   (def vpsignb #x66 #x08 #x0f38)
   (def vpsignw #x66 #x09 #x0f38)
   (def vpsignd #x66 #x0a #x0f38)
-  (def vpmulhrsw #x66 #x0b #x0f38)
-
-  (def vpmuldq #x66 #x28 #x0f38)
-  (def vpcmpeqq #x66 #x29 #x0f38)
-  (def vpackusdw #x66 #x2b #x0f38)
-
-  (def vpcmpgtq #x66 #x37 #x0f38)
-  (def vpminsb #x66 #x38 #x0f38)
-  (def vpminsd #x66 #x39 #x0f38)
-  (def vpminuw #x66 #x3a #x0f38)
-  (def vpminud #x66 #x3b #x0f38)
-  (def vpmaxsb #x66 #x3c #x0f38)
-  (def vpmaxsd #x66 #x3d #x0f38)
-  (def vpmaxuw #x66 #x3e #x0f38)
-  (def vpmaxud #x66 #x3f #x0f38)
-
-  (def vpmulld #x66 #x40 #x0f38)
   (def vphminposuw #x66 #x41 #x0f38)
 
-  (def vaesenc #x66 #xdc #x0f38)
-  (def vaesenclast #x66 #xdd #x0f38)
-  (def vaesdec #x66 #xde #x0f38)
-  (def vaesdeclast #x66 #xdf #x0f38))
+  ;; comparisons: avx2-exlusive (for now...)
+  ;; integer comparison
+  (def vpcmpeqb #x66 #x74)
+  (def vpcmpeqw #x66 #x75)
+  (def vpcmpeqd #x66 #x76)
+  (def vpcmpeqq #x66 #x29 #x0f38)
+  (def vpcmpgtb #x66 #x64)
+  (def vpcmpgtw #x66 #x65)
+  (def vpcmpgtd #x66 #x66)
+  (def vpcmpgtq #x66 #x37 #x0f38))
+
+;; integer ops with w to control masking size
+(macrolet ((def (name named nameq prefix opcode &optional (opcode-prefix #x0F))
+             `(progn
+                (define-instruction ,name (segment dst src src2)
+                  ,@(avx2-inst-printer-list 'ymm-ymm/mem prefix opcode :nds t
+                                            :opcode-prefix opcode-prefix)
+                  (:emitter
+                   (emit-avx2-inst segment src2 dst ,prefix ,opcode
+                                   :opcode-prefix ,opcode-prefix
+                                   :vvvv src)))
+                (define-instruction ,named (segment dst src src2)
+                  ,@(avx512-inst-printer-list 'ymm-ymm/mem prefix opcode :nds t :w 0
+                                              :opcode-prefix opcode-prefix)
+                  (:emitter
+                   (emit-avx512-inst segment src2 dst ,prefix ,opcode :w 0
+                                     :opcode-prefix ,opcode-prefix
+                                     :vvvvv src)))
+                (define-instruction ,nameq (segment dst src src2)
+                  ,@(avx512-inst-printer-list 'ymm-ymm/mem prefix opcode :nds t :w 1
+                                              :opcode-prefix opcode-prefix)
+                  (:emitter
+                   (emit-avx512-inst segment src2 dst ,prefix ,opcode :w 1
+                                     :opcode-prefix ,opcode-prefix
+                                     :vvvvv src))))))
+  (def vpand  vpandd  vpandq  #x66 #xdb)
+  (def vpandn vpandnd vpandnq #x66 #xdf)
+  (def vpor   vpord   vporq   #x66 #xeb)
+  (def vpxor  vpxord  vpxorq  #x66 #xef))
 
 ;;; Two arg instructions
 (macrolet ((def (name prefix opcode &optional (opcode-prefix #x0F))
@@ -825,13 +970,19 @@
 ;; avx512 insert.  Note: despite the weirdness with sizing, size is taken first from the register, which gives the right result
 (macrolet ((def (name op w displacement-multiplier)
              `(define-instruction ,name (segment dst src src2 offs)
+                ,@(avx512-inst-printer-list 'ymm-ymm/mem #x66 op
+                                          :w w
+                                          :opcode-prefix #x0f3a
+                                          :more-fields `((imm nil :type 'imm-byte))
+                                          :printer `(:name :tab reg aaa z ", " vvvv ", " reg/mem ", " imm))
                 (:emitter
                  (aver (and (xmm-register-p dst)
                             (xmm-register-p src)
                             (or (xmm-register-p src2)
                                 (ea-p src2))))
                  (emit-avx512-inst segment src2 dst #x66 ,op :vvvvv src :displacement-multiplier ,displacement-multiplier :w ,w :opcode-prefix #x0f3a :remaining-bytes 1)
-                 (emit-byte segment offs)))))
+                 (emit-byte segment offs))
+                )))
   (def vinserti32x4 #x38 0 16)
   (def vinserti64x2 #x38 1 16)
   (def vinserti32x8 #x3a 0 32)
@@ -860,6 +1011,7 @@
   (def vextractf64x4 #x1b 1 32))
 
 ;; basic avx512 logic (should really merge with avx2 but ...)
+#|
 (macrolet ((def (name prefix op w)
            `(define-instruction ,name (segment dst src src2)
               (:emitter
@@ -870,6 +1022,7 @@
                (emit-avx512-inst segment src2 dst ,prefix ,op :w ,w :vvvvv src)))))
   (def vpxord #x66 #xef 0)
   (def vpxorq #x66 #xef 1))
+|#
 
 (macrolet ((def (name prefix opcode-from opcode-to
                                  &key force-to-mem

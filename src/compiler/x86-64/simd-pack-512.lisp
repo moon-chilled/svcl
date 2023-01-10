@@ -402,7 +402,8 @@
    (inst vinsertf128 dst dst t0 1)
    (inst vunpcklpd t0 p6 p7)
    (inst vinsertf128 t1 t1 t0 1)
-   (inst vinsertf64x4 dst dst t1 1)))
+   (inst vinsertf64x4 dst dst t1 1)
+   ))
 
 (define-vop (%make-simd-pack-512-single)
   (:translate %make-simd-pack-512-single)
